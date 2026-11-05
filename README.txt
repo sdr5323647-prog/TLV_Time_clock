@@ -70,5 +70,5 @@ THINGS TO KNOW
 
 
 UPDATING
-Replace the files on Netlify. If you change index.html, also bump CACHE = 'timeclock-v3' in sw.js
-(for example to 'timeclock-v4') so devices pick up the new version.
+Replace the files on Netlify. If you change index.html, also bump CACHE = 'timeclock-v4' in sw.js
+(for example to 'timeclock-v5') so devices pick up the new version.

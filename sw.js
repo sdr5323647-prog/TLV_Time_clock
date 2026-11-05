@@ -1,5 +1,5 @@
 // Offline cache. Bump CACHE when you change any file.
-const CACHE = 'timeclock-v3';
+const CACHE = 'timeclock-v4';
 const FILES = ['./', './index.html', './manifest.webmanifest', './jszip.min.js', './icon-192.png', './icon-512.png', './sync-config.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
