@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Time Clock">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#16222E">
+<title>Time Clock</title>
+<script src="jszip.min.js"></script>
+<script src="sync-config.js"></script>
+<style>
+  :root {
+    --bg: #E8EDF1;
+    --card: #FFFFFF;
+    --ink: #16222E;
+    --muted: #5B6B7A;
+    --line: #D5DDE4;
+    --in: #14804A;
+    --in-soft: #DDF1E6;
+    --out: #C2410C;
+    --out-soft: #FBE6DB;
+    --warn: #B45309;
+    --warn-soft: #FEF3C7;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Heebo", "Segoe UI", system-ui, -apple-system, "Arial Hebrew", Arial, sans-serif;
+    font-size: 18px; line-height: 1.4; }
+  body { min-height: 100vh; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+  button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #2563EB; outline-offset: 2px; }
+  .app { max-width: 1180px; margin: 0 auto; padding: 18px; display: grid; gap: 18px; }
+  @media (min-width: 900px) {
+    .app { grid-template-columns: 430px 1fr; align-items: start; padding: 28px; gap: 28px; }
+    .clock-card { position: sticky; top: 28px; }
+  }
+  .card { background: var(--card); border-radius: 22px; padding: 22px; border: 1px solid var(--line); }
+
+  /* ---- Clock card ---- */
+  .clock-card { text-align: center; padding: 26px 22px 22px; transition: background .25s; }
+  .clock-card.on { background: var(--in-soft); border-color: #B7DFC7; }
+  .status { font-size: 20px; font-weight: 600; color: var(--muted); min-height: 28px; }
+  .clock-card.on .status { color: var(--in); }
+  .timer { font-size: 68px; font-weight: 700; letter-spacing: 1px; margin: 6px 0 2px;
+    font-variant-numeric: tabular-nums; direction: ltr; }
+  .sub { color: var(--muted); min-height: 26px; }
+  .big-btn { width: 100%; margin-top: 18px; padding: 34px 10px; border-radius: 26px; font-size: 44px;
+    font-weight: 800; color: #fff; background: var(--in); transition: transform .08s, background .2s;
+    box-shadow: 0 6px 0 #0D5C34; }
+  .big-btn.out { background: var(--out); box-shadow: 0 6px 0 #8F2F07; }
+  .big-btn:active { transform: translateY(5px); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
+  .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-top: 20px; }
+  .link { color: var(--muted); font-size: 17px; text-decoration: underline; text-underline-offset: 4px; padding: 10px 6px; min-height: 44px; }
+  .link:disabled { opacity: .35; text-decoration: none; }
+  .today-line { margin-top: 10px; padding-top: 14px; border-top: 1px dashed var(--line); color: var(--muted); }
+  .today-line b { color: var(--ink); font-size: 22px; }
+
+  /* ---- Banner ---- */
+  .banner { background: var(--warn-soft); color: #78350F; border-radius: 14px; padding: 14px 16px; margin-bottom: 16px;
+    display: flex; gap: 12px; align-items: center; justify-content: space-between; text-align: left; }
+  .banner button { background: #78350F; color: #fff; padding: 10px 16px; border-radius: 10px; font-weight: 600; white-space: nowrap; min-height: 44px; }
+
+  /* ---- Tabs ---- */
+  .tabs { display: flex; gap: 6px; background: #D5DDE4; padding: 5px; border-radius: 16px; margin-bottom: 18px; }
+  .tab { flex: 1; padding: 13px; border-radius: 12px; font-weight: 700; color: var(--muted); font-size: 19px; min-height: 52px; }
+  .tab.active { background: #fff; color: var(--ink); }
+  .gear { padding: 0 16px; font-size: 22px; color: var(--muted); border-radius: 12px; }
+
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; }
+  .nav h2 { margin: 0; font-size: 24px; text-align: center; flex: 1; }
+  .nav button { width: 52px; height: 52px; border-radius: 14px; background: var(--bg); font-size: 24px; font-weight: 700; }
+
+  /* ---- Day list ---- */
+  .total-line { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; color: var(--muted); }
+  .total-line b { font-size: 34px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .shift { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 16px; border-radius: 16px;
+    background: var(--bg); margin-bottom: 10px; min-height: 68px; }
+  .shift .times { font-size: 22px; font-weight: 700; direction: ltr; unicode-bidi: isolate; font-variant-numeric: tabular-nums; }
+  .shift .note { color: var(--muted); font-size: 16px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .shift .dur { margin-inline-start: auto; font-weight: 700; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .shift .live { color: var(--in); }
+  .empty { text-align: center; color: var(--muted); padding: 26px 10px; }
+  .add-btn { width: 100%; padding: 16px; border: 2px dashed var(--line); border-radius: 16px; color: var(--muted); font-weight: 600; min-height: 56px; }
+
+  /* ---- Month ---- */
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 18px; }
+  @media (min-width: 560px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+  .stat { background: var(--bg); border-radius: 16px; padding: 14px; }
+  .stat .k { color: var(--muted); font-size: 15px; }
+  .stat .v { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .stat.hero { grid-column: 1 / -1; background: var(--ink); color: #fff; }
+  .stat.hero .k { color: #AFC0CF; }
+  .stat.hero .v { font-size: 46px; }
+  .pos { color: var(--in); } .neg { color: var(--out); }
+  .stat.hero .pos { color: #6EE7A8; } .stat.hero .neg { color: #FDA77A; }
+  .day-row { display: grid; grid-template-columns: 112px 1fr 76px; align-items: center; gap: 12px; width: 100%;
+    padding: 10px 12px; border-radius: 12px; text-align: left; min-height: 52px; }
+  .day-row:active { background: var(--bg); }
+  .day-row.today { background: #EEF4FF; }
+  .day-row.off .d { color: #98A5B1; }
+  .day-row .d { font-weight: 600; }
+  .bar { height: 12px; background: var(--bg); border-radius: 8px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--in); border-radius: 8px; }
+  .bar i.over { background: #1D4ED8; }
+  .day-row .h { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; direction: ltr; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  .btn { padding: 14px 20px; border-radius: 14px; background: var(--ink); color: #fff; font-weight: 700; min-height: 52px; }
+  .btn.ghost { background: var(--bg); color: var(--ink); }
+  .btn.danger { background: var(--out-soft); color: var(--out); }
+
+  /* ---- Modal ---- */
+  .overlay { position: fixed; inset: 0; background: rgba(15,23,32,.55); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
+  .modal { background: #fff; border-radius: 22px; padding: 24px; width: 100%; max-width: 470px; max-height: 92vh; overflow: auto; }
+  .modal h3 { margin: 0 0 16px; font-size: 24px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; color: var(--muted); font-size: 15px; margin-bottom: 5px; }
+  .field input, .field select { width: 100%; padding: 14px; font: inherit; font-size: 20px; border: 2px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); min-height: 54px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .hint { font-size: 14px; color: var(--muted); margin-top: 4px; }
+  .modal .actions { margin-top: 8px; }
+  .modal .actions .btn { flex: 1; }
+  .days-pick { display: flex; gap: 6px; flex-wrap: wrap; }
+  .days-pick label { margin: 0; display: flex; align-items: center; justify-content: center; width: 58px; height: 52px; border-radius: 12px; background: var(--bg); color: var(--ink); font-weight: 700; font-size: 16px; cursor: pointer; }
+  .days-pick input { display: none; }
+  .days-pick input:checked + span { color: #fff; }
+  .days-pick label:has(input:checked) { background: var(--ink); color: #fff; }
+
+  /* ---- Toast ---- */
+  .toast { position: fixed; bottom: calc(22px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff;
+    padding: 14px 18px; border-radius: 16px; display: flex; gap: 18px; align-items: center; z-index: 60; box-shadow: 0 8px 30px rgba(0,0,0,.3); max-width: 92vw; }
+  .toast button { color: #8CC1FF; font-weight: 800; padding: 8px 4px; min-height: 44px; }
+  @media (max-width: 520px) { .nav h2 { font-size: 19px; } .tab { font-size: 17px; } .big-btn { font-size: 38px; padding: 30px 10px; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<div id="layer"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------- Storage (works in tablet browser; falls back gracefully) ----------
+  const KEY = 'timeclock-v1';
+  const store = {
+    async get() {
+      try { if (window.storage) { const r = await window.storage.get(KEY); if (r && r.value) return JSON.parse(r.value); } } catch (e) {}
+      try { const v = localStorage.getItem(KEY); if (v) return JSON.parse(v); } catch (e) {}
+      return null;
+    },
+    async set(d) {
+      const s = JSON.stringify(d);
+      try { if (window.storage) { await window.storage.set(KEY, s); return; } } catch (e) {}
+      try { localStorage.setItem(KEY, s); } catch (e) {}
+    }
+  };
+
+  // ---------- State ----------
+  const IL = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Jerusalem'; } catch (e) { return false; } })();
+  const defSettings = () => ({ target: 8, rate: 0, currency: IL ? '₪' : '$', workdays: IL ? [0, 1, 2, 3, 4] : [1, 2, 3, 4, 5], name: '', email: '', autoBreak: 0 });
+  let data = { shifts: [], dayNotes: {}, meta: { u: {}, del: {}, dirty: {}, uid: null, account: null }, settings: defSettings() };
+  let ui = { tab: 'day', day: dkey(Date.now()), month: dkey(Date.now()).slice(0, 7) };
+  let undoSnap = null, toastTimer = null, prevShifts = null;
+
+  // ---------- Helpers ----------
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function dkey(ts) { const d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function tkey(ts) { const d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function parse(date, time) { return new Date(date + 'T' + time).getTime(); }
+  function hm(ms) { const m = Math.max(0, Math.round(ms / 60000)); return Math.floor(m / 60) + ':' + pad(m % 60); }
+  function hms(ms) { const s = Math.max(0, Math.floor(ms / 1000)); return pad(Math.floor(s / 3600)) + ':' + pad(Math.floor(s % 3600 / 60)) + ':' + pad(s % 60); }
+  function dec(ms) { return (ms / 3600000).toFixed(2); }
+  function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  function dur(s, now) { return (s.end == null ? now : s.end) - s.start; }
+  function openShift() { return data.shifts.find(s => s.end == null) || null; }
+  function dayShifts(key) { return data.shifts.filter(s => dkey(s.start) === key).sort((a, b) => a.start - b.start); }
+  function dayTotal(key, now) { return dayShifts(key).reduce((t, s) => t + dur(s, now), 0); }
+  function fmtDay(key) { return new Date(key + 'T12:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
+  function fmtMonth(m) { return new Date(m + '-01T12:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }); }
+  function addDays(key, n) { const d = new Date(key + 'T12:00'); d.setDate(d.getDate() + n); return dkey(d.getTime()); }
+  function addMonths(m, n) { const d = new Date(m + '-01T12:00'); d.setMonth(d.getMonth() + n); return dkey(d.getTime()).slice(0, 7); }
+  function save() { if (prevShifts) { markDiff(prevShifts); prevShifts = null; } store.set(data); queueSync(); }
+  function snapshot() { undoSnap = JSON.stringify(data.shifts); prevShifts = JSON.parse(undoSnap); }
+  function buzz() { try { navigator.vibrate && navigator.vibrate(30); } catch (e) {} }
+
+  // ---------- Actions ----------
+  function toggle() {
+    snapshot(); buzz();
+    const o = openShift(), now = Date.now();
+    if (o) { o.end = now; toast('Clocked out at ' + tkey(now)); }
+    else { data.shifts.push({ id: uid(), start: now, end: null, note: '' }); ui.day = dkey(now); toast('Clocked in at ' + tkey(now)); }
+    save(); render();
+  }
+  function undo() {
+    if (!undoSnap) return;
+    prevShifts = JSON.parse(JSON.stringify(data.shifts));
+    data.shifts = JSON.parse(undoSnap); undoSnap = null; save(); hideToast(); render();
+  }
+  function toast(msg) {
+    hideToast();
+    const t = document.createElement('div'); t.className = 'toast'; t.id = 'toast';
+    t.innerHTML = '<span>' + esc(msg) + '</span><button id="undoBtn">Undo</button>';
+    document.body.appendChild(t);
+    document.getElementById('undoBtn').onclick = undo;
+    toastTimer = setTimeout(hideToast, 7000);
+  }
+  function hideToast() { clearTimeout(toastTimer); const t = document.getElementById('toast'); if (t) t.remove(); }
+
+  // ---------- Render ----------
+  const $ = id => document.getElementById(id);
+
+  function render() {
+    const now = Date.now(), o = openShift();
+    const today = dkey(now);
+    const app = $('app');
+    const lastOpenOld = o && (now - o.start > 16 * 3600000 || dkey(o.start) !== today && now - o.start > 12 * 3600000);
+
+    const clock = `
+      <section class="card clock-card ${o ? 'on' : ''}">
+        <div class="status" id="status">${o ? 'On shift since ' + tkey(o.start) : 'Not on shift'}</div>
+        <div class="timer" id="timer">${o ? hms(now - o.start) : fmtClock(now)}</div>
+        <div class="sub">${new Date(now).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+        <button class="big-btn ${o ? 'out' : ''}" id="toggleBtn">${o ? 'Clock out' : 'Clock in'}</button>
+        <div class="links">
+          <button class="link" id="undoLast" ${undoSnap ? '' : 'disabled'}>Undo last action</button>
+          <button class="link" id="fixStart">${o ? 'Forgot? Change start time' : 'Forgot to clock in? Add an entry'}</button>
+        </div>
+        <div class="today-line">Total today: <b id="todayTotal">${hm(dayTotal(today, now))}</b></div>
+        ${sync.state !== 'none' && sync.state !== 'notconfigured' ? '<button class="link" id="syncLine" style="margin-top:4px"></button>' : ''}
+      </section>`;
+
+    const main = `
+      <section class="card">
+        ${lastOpenOld ? `<div class="banner"><span>There is an open shift from ${fmtDay(dkey(o.start))} (${tkey(o.start)}). Forgot to clock out?</span><button id="fixOld">Fix it</button></div>` : ''}
+        <div style="display:flex;gap:8px;align-items:stretch;">
+          <div class="tabs" style="flex:1;margin:0 0 18px">
+            <button class="tab ${ui.tab === 'day' ? 'active' : ''}" data-tab="day">Day</button>
+            <button class="tab ${ui.tab === 'month' ? 'active' : ''}" data-tab="month">Monthly summary</button>
+          </div>
+          <button class="gear" id="gear" aria-label="Settings" style="margin-bottom:18px">⚙️</button>
+        </div>
+        ${ui.tab === 'day' ? dayView(now, today) : monthView(now, today)}
+      </section>`;
+
+    app.innerHTML = clock + main;
+    bind();
+    updateSyncUI();
+  }
+
+  function fmtClock(ts) { const d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+
+  function dayView(now, today) {
+    const list = dayShifts(ui.day);
+    const rows = list.map(s => `
+      <button class="shift" data-edit="${s.id}">
+        <span class="times">${tkey(s.start)} – ${s.end == null ? '…' : tkey(s.end)}${s.end != null && dkey(s.end) !== dkey(s.start) ? ' (+1)' : ''}</span>
+        <span class="note">${esc(s.note)}</span>
+        <span class="dur ${s.end == null ? 'live' : ''}" ${s.end == null ? 'data-live="' + s.id + '"' : ''}>${hm(dur(s, now))}</span>
+      </button>`).join('');
+    return `
+      <div class="nav">
+        <button data-day="-1" aria-label="Previous day">‹</button>
+        <h2>${ui.day === today ? 'Today · ' : ''}${fmtDay(ui.day)}</h2>
+        <button data-day="1" aria-label="Next day">›</button>
+      </div>
+      <div class="total-line"><span>Day total</span><b id="dayTotal">${hm(dayTotal(ui.day, now))}</b></div>
+      ${rows || '<div class="empty">No entries for this day</div>'}
+      <button class="add-btn" id="addManual">+ Add entry manually</button>
+      ${list.length === 0 ? `<div class="field" style="margin-top:16px"><label>Day off or holiday? Add a note for the work report</label><input type="text" id="dayNote" value="${esc(data.dayNotes[ui.day] || '')}" placeholder="e.g. Public holiday – did not work"></div>` : ''}
+      ${ui.day !== today ? '<div class="actions"><button class="btn ghost" id="toToday">Back to today</button></div>' : ''}`;
+  }
+
+  function monthView(now, today) {
+    const [y, m] = ui.month.split('-').map(Number);
+    const days = new Date(y, m, 0).getDate();
+    const st = data.settings, targetMs = st.target * 3600000;
+    let total = 0, worked = 0, expected = 0, rows = '';
+    for (let d = 1; d <= days; d++) {
+      const key = ui.month + '-' + pad(d);
+      const wd = new Date(key + 'T12:00').getDay();
+      const isWork = st.workdays.includes(wd);
+      const t = dayTotal(key, now);
+      total += t; if (t > 0) worked++;
+      if (isWork && key <= today) expected += targetMs;
+      const pct = targetMs > 0 ? Math.min(100, t / targetMs * 100) : (t > 0 ? 100 : 0);
+      const name = new Date(key + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' }) + ' ' + d;
+      rows += `<button class="day-row ${key === today ? 'today' : ''} ${!isWork && t === 0 ? 'off' : ''}" data-open="${key}">
+        <span class="d">${name}</span>
+        <span class="bar"><i class="${t > targetMs ? 'over' : ''}" style="width:${pct}%"></i></span>
+        <span class="h">${t > 0 ? hm(t) : '–'}</span></button>`;
+    }
+    const diff = total - expected;
+    const avg = worked ? total / worked : 0;
+    const pay = st.rate > 0 ? (total / 3600000 * st.rate) : 0;
+    return `
+      <div class="nav">
+        <button data-month="-1" aria-label="Previous month">‹</button>
+        <h2>${fmtMonth(ui.month)}</h2>
+        <button data-month="1" aria-label="Next month">›</button>
+      </div>
+      <div class="stats">
+        <div class="stat hero"><div class="k">Total hours this month</div><div class="v">${hm(total)} <span style="font-size:20px;font-weight:500;opacity:.7">(${dec(total)})</span></div></div>
+        <div class="stat"><div class="k">Days worked</div><div class="v">${worked}</div></div>
+        <div class="stat"><div class="k">Average per day</div><div class="v">${hm(avg)}</div></div>
+        <div class="stat"><div class="k">${diff >= 0 ? 'Hours ahead' : 'Hours short'}</div><div class="v ${diff >= 0 ? 'pos' : 'neg'}">${hm(Math.abs(diff))}</div></div>
+        ${pay > 0 ? `<div class="stat"><div class="k">Estimated pay</div><div class="v">${st.currency || ''}${Math.round(pay).toLocaleString('en-GB')}</div></div>` : `<div class="stat"><div class="k">Target so far</div><div class="v">${hm(expected)}</div></div>`}
+      </div>
+      ${rows}
+      <div class="actions">
+        <button class="btn" id="exportXlsx">Hours report (Excel)</button>
+        <button class="btn ghost" id="exportCsv">CSV</button>
+        <button class="btn ghost" id="printBtn">Print</button>
+      </div>`;
+  }
+
+  function bind() {
+    $('toggleBtn').onclick = toggle;
+    $('undoLast').onclick = undo;
+    $('fixStart').onclick = () => { const o = openShift(); o ? editShift(o.id) : editShift(null, dkey(Date.now())); };
+    const fo = $('fixOld'); if (fo) fo.onclick = () => editShift(openShift().id);
+    $('gear').onclick = settingsModal;
+    const sl = $('syncLine'); if (sl) sl.onclick = () => (sync.state === 'needtoken' ? requestToken() : settingsModal());
+    document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { ui.tab = b.dataset.tab; if (ui.tab === 'month') ui.month = ui.day.slice(0, 7); render(); });
+    document.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { ui.day = addDays(ui.day, +b.dataset.day); render(); });
+    document.querySelectorAll('[data-month]').forEach(b => b.onclick = () => { ui.month = addMonths(ui.month, +b.dataset.month); render(); });
+    document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editShift(b.dataset.edit));
+    document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { ui.day = b.dataset.open; ui.tab = 'day'; render(); });
+    const dn = $('dayNote'); if (dn) dn.onchange = () => { const v = dn.value.trim(); if (v) data.dayNotes[ui.day] = v; else delete data.dayNotes[ui.day]; touch('n_' + ui.day, !v); save(); };
+    const am = $('addManual'); if (am) am.onclick = () => editShift(null, ui.day);
+    const tt = $('toToday'); if (tt) tt.onclick = () => { ui.day = dkey(Date.now()); render(); };
+    const xx = $('exportXlsx'); if (xx) xx.onclick = exportModal;
+    const ex = $('exportCsv'); if (ex) ex.onclick = exportCsv;
+    const pr = $('printBtn'); if (pr) pr.onclick = () => window.print();
+  }
+
+  // ---------- Edit modal ----------
+  function openModal(html) {
+    closeModal();
+    const o = document.createElement('div'); o.className = 'overlay'; o.id = 'overlay';
+    o.innerHTML = '<div class="modal" role="dialog">' + html + '</div>';
+    o.addEventListener('mousedown', e => { if (e.target === o) closeModal(); });
+    $('layer').appendChild(o);
+    return o;
+  }
+  function closeModal() { const o = $('overlay'); if (o) o.remove(); }
+
+  function editShift(id, dateForNew) {
+    const s = id ? data.shifts.find(x => x.id === id) : null;
+    const date = s ? dkey(s.start) : dateForNew;
+    const startV = s ? tkey(s.start) : '09:00';
+    const endV = s ? (s.end == null ? '' : tkey(s.end)) : '17:00';
+    const o = openModal(`
+      <h3>${s ? 'Edit entry' : 'New entry'}</h3>
+      <div class="field"><label>Start date</label><input type="date" id="fDate" value="${date}"></div>
+      <div class="row2">
+        <div class="field"><label>Start time</label><input type="time" id="fStart" value="${startV}"></div>
+        <div class="field"><label>End time</label><input type="time" id="fEnd" value="${endV}"></div>
+      </div>
+      <div class="hint" style="margin:-6px 0 12px">An end time earlier than the start counts as the next day. Leave it empty if you are still on shift.</div>
+      <div class="field"><label>Note (optional)</label><input type="text" id="fNote" value="${esc(s ? s.note : '')}" placeholder="e.g. Worked from home"></div>
+      <div id="fErr" class="hint" style="color:var(--out);min-height:20px"></div>
+      <div class="actions">
+        <button class="btn" id="fSave">Save</button>
+        ${s ? '<button class="btn danger" id="fDel">Delete</button>' : ''}
+        <button class="btn ghost" id="fCancel">Close</button>
+      </div>`);
+    $('fCancel').onclick = closeModal;
+    $('fSave').onclick = () => {
+      const d = $('fDate').value, a = $('fStart').value, b = $('fEnd').value;
+      if (!d || !a) { $('fErr').textContent = 'Date and start time are required'; return; }
+      const start = parse(d, a);
+      let end = null;
+      if (b) { end = parse(d, b); if (end <= start) end += 86400000; }
+      if (end == null && data.shifts.some(x => x.end == null && (!s || x.id !== s.id))) { $('fErr').textContent = 'There is already an open shift. Close it first.'; return; }
+      if (end != null && end - start > 24 * 3600000) { $('fErr').textContent = 'Entry is longer than 24 hours – check the times'; return; }
+      snapshot();
+      if (s) { s.start = start; s.end = end; s.note = $('fNote').value.trim(); }
+      else data.shifts.push({ id: uid(), start, end, note: $('fNote').value.trim() });
+      ui.day = d; save(); closeModal(); render(); toast('Saved');
+    };
+    if (s) $('fDel').onclick = () => {
+      snapshot(); data.shifts = data.shifts.filter(x => x.id !== s.id);
+      save(); closeModal(); render(); toast('Entry deleted');
+    };
+  }
+
+  // ---------- Settings ----------
+  function settingsModal() {
+    const st = data.settings;
+    const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    openModal(`
+      <h3>Settings</h3>
+      <div class="field"><label>Daily target (hours)</label><input type="number" id="sTarget" step="0.25" min="0" max="24" value="${st.target}"></div>
+      <div class="field"><label>Full name (appears on the hours report)</label><input type="text" id="sName" value="${esc(st.name)}"></div>
+      <div class="field"><label>Fixed daily break (minutes, 0 = none)</label><input type="number" id="sBreak" min="0" step="5" value="${st.autoBreak || 0}"></div>
+      <div class="field"><label>Email to send reports to (optional)</label><input type="email" id="sEmail" value="${esc(st.email)}" placeholder="name@company.com"></div>
+      <div class="field"><label>Work days</label>
+        <div class="days-pick">${names.map((n, i) => `<label><input type="checkbox" value="${i}" ${st.workdays.includes(i) ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div></div>
+      <div class="field"><label>Hourly rate (optional, for estimated pay)</label><div class="row2"><input type="number" id="sRate" min="0" step="0.5" value="${st.rate || ''}"><input type="text" id="sCur" maxlength="4" value="${esc(st.currency)}" aria-label="Currency symbol"></div></div>
+      ${syncSection()}
+      <div class="field"><label>Backup</label>
+        <div class="actions" style="margin:0"><button class="btn ghost" id="bkExport">Download backup</button><button class="btn ghost" id="bkImport">Restore backup</button></div>
+        <input type="file" id="bkFile" accept=".json" style="display:none">
+        <div class="hint">Your data is stored privately in this browser on this device. Download a backup now and then. You can also restore it on another device.</div></div>
+      <div class="actions"><button class="btn" id="sSave">Save</button><button class="btn ghost" id="sClose">Close</button></div>`);
+    $('sClose').onclick = closeModal;
+    bindSync();
+    $('sSave').onclick = () => {
+      data.settings.target = Math.max(0, parseFloat($('sTarget').value) || 0);
+      data.settings.rate = Math.max(0, parseFloat($('sRate').value) || 0);
+      data.settings.name = $('sName').value.trim();
+      data.settings.email = $('sEmail').value.trim();
+      data.settings.currency = $('sCur').value.trim();
+      touch('cfg');
+      data.settings.autoBreak = Math.max(0, parseInt($('sBreak').value, 10) || 0);
+      data.settings.workdays = [...document.querySelectorAll('.days-pick input:checked')].map(i => +i.value);
+      save(); closeModal(); render();
+    };
+    $('bkExport').onclick = () => download('timeclock-backup-' + dkey(Date.now()) + '.json', JSON.stringify({ shifts: data.shifts, dayNotes: data.dayNotes, settings: data.settings }), 'application/json');
+    $('bkImport').onclick = () => $('bkFile').click();
+    $('bkFile').onchange = e => {
+      const f = e.target.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const d = JSON.parse(r.result);
+          if (!d.shifts || !Array.isArray(d.shifts)) throw 0;
+          snapshot(); const oldNotes = Object.keys(data.dayNotes);
+          data = { shifts: d.shifts, dayNotes: d.dayNotes || {}, meta: data.meta, settings: Object.assign({}, data.settings, d.settings) };
+          oldNotes.forEach(k => { if (!(k in data.dayNotes)) touch('n_' + k, true); });
+          Object.keys(data.dayNotes).forEach(k => touch('n_' + k)); touch('cfg');
+          save(); closeModal(); render(); toast('Backup restored');
+        } catch (err) { alert('Invalid backup file'); }
+      };
+      r.readAsText(f);
+    };
+  }
+
+  // ---------- Export ----------
+  function download(name, content, type) {
+    const blob = new Blob([content], { type });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportCsv() {
+    const now = Date.now();
+    const rows = [['Date', 'Day', 'Start', 'End', 'Duration (h:mm)', 'Duration (decimal)', 'Note']];
+    data.shifts.filter(s => dkey(s.start).startsWith(ui.month)).sort((a, b) => a.start - b.start).forEach(s => {
+      rows.push([dkey(s.start), new Date(s.start).toLocaleDateString('en-GB', { weekday: 'long' }), tkey(s.start), s.end == null ? '' : tkey(s.end), hm(dur(s, now)), dec(dur(s, now)), s.note || '']);
+    });
+    let total = 0; for (let d = 1; d <= 31; d++) total += dayTotal(ui.month + '-' + pad(d), now);
+    rows.push([], ['Total', '', '', '', hm(total), dec(total), '']);
+    const csv = '\uFEFF' + rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\r\n');
+    download('hours-' + ui.month + '.csv', csv, 'text/csv;charset=utf-8');
+  }
+
+
+  // ---------- Company hours report (Excel, built from the Torah Live template) ----------
+  const TEMPLATE_B64 = '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';
+  const OT_REGULAR = 8.4, OT_125 = 2; // same values as cells C37 / C38 in the template
+
+  function buildMonthRows(month) {
+    const [y, m] = month.split('-').map(Number);
+    const days = new Date(y, m, 0).getDate();
+    const rows = [], open = [];
+    const tod = min => { const dt = new Date(min * 60000); return (dt.getHours() * 60 + dt.getMinutes()) / 1440; };
+    for (let d = 1; d <= days; d++) {
+      const key = month + '-' + pad(d);
+      const list = dayShifts(key);
+      if (list.some(s => s.end == null)) open.push(key);
+      const done = list.filter(s => s.end != null);
+      const r = { d, key, c: null, e: null, brk: 0, f: 0, g: 0, h: 0, i: 0, note: '' };
+      if (!done.length) { if (!list.length) r.note = data.dayNotes[key] || ''; rows.push(r); continue; }
+      const sM = Math.round(done[0].start / 60000);
+      const eM = Math.max.apply(null, done.map(s => Math.round(s.end / 60000)));
+      const worked = done.reduce((t, s) => t + Math.round(s.end / 60000) - Math.round(s.start / 60000), 0);
+      let brk = Math.max(0, (eM - sM) - worked) + (data.settings.autoBreak || 0);
+      brk = Math.min(brk, eM - sM);
+      r.c = tod(sM); r.e = tod(eM); r.brk = brk;
+      const f = (r.c > r.e ? r.e + 1 - r.c : r.e - r.c) * 24 - brk / 60;
+      r.f = f;
+      r.g = f > OT_REGULAR ? OT_REGULAR : f;
+      r.h = f < OT_REGULAR ? 0 : (f > OT_REGULAR + OT_125 ? OT_125 : f - OT_REGULAR);
+      r.i = f > OT_REGULAR + OT_125 ? f - r.g - r.h : 0;
+      rows.push(r);
+    }
+    const sum = k => rows.reduce((t, r) => t + r[k], 0);
+    return { rows, open, days, y, m, tot: { f: sum('f'), g: sum('g'), h: sum('h'), i: sum('i') }, worked: rows.filter(r => r.c != null).length };
+  }
+
+  const xmlEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const cellRe = ref => new RegExp('<c r="' + ref + '"(?:[^>]*?/>|[^>]*>.*?</c>)', 's');
+
+  async function makeXlsx(month, name) {
+    if (!window.JSZip) throw new Error('nolib');
+    const info = buildMonthRows(month);
+    const zip = await JSZip.loadAsync(TEMPLATE_B64, { base64: true });
+    let x = await zip.file('xl/worksheets/sheet1.xml').async('string');
+    const styleOf = ref => { const m = x.match(cellRe(ref)); return m ? (m[0].match(/ s="(\d+)"/) || [])[1] : null; };
+    const put = (ref, inner, t) => {
+      const s = styleOf(ref);
+      const cell = '<c r="' + ref + '"' + (s != null ? ' s="' + s + '"' : '') + (t ? ' t="' + t + '"' : '') + '>' + inner + '</c>';
+      if (!cellRe(ref).test(x)) throw new Error('missing cell ' + ref);
+      x = x.replace(cellRe(ref), () => cell);
+    };
+    const putNum = (ref, v) => put(ref, '<v>' + v + '</v>');
+    const putText = (ref, text) => put(ref, '<is><t xml:space="preserve">' + xmlEsc(text) + '</t></is>', 'inlineStr');
+    const putCached = (ref, v) => { // keep the template's formula, refresh its cached value
+      const m = x.match(cellRe(ref)); const f = m[0].match(/<f[^>]*>.*?<\/f>/s)[0];
+      if (v === '') put(ref, f + '<v></v>', 'str'); else put(ref, f + '<v>' + v + '</v>', 'n');
+    };
+
+    const monthName = new Date(info.y, info.m - 1, 1).toLocaleDateString('en-GB', { month: 'long' });
+    putText('A1', 'דו"ח שעות לחודש ' + monthName + ' ' + info.y);
+    putText('A2', 'שם העובד/ת: ' + name);
+
+    const serial = d => Math.round((Date.UTC(info.y, info.m - 1, d) - Date.UTC(1899, 11, 30)) / 86400000);
+    for (let d = 1; d <= 31; d++) {
+      const row = 3 + d, r = info.rows[d - 1];
+      if (d === 1) putNum('A4', serial(1)); else putCached('A' + row, d <= info.days ? serial(d) : '');
+      putCached('B' + row, d <= info.days ? serial(d) : '');
+      if (r) {
+        if (r.c != null) {
+          putNum('C' + row, r.c); putNum('D' + row, r.e);
+          if (r.brk > 0) putNum('E' + row, r.brk);
+        } else if (r.note) putText('C' + row, r.note);
+      }
+      const z = r || { f: 0, g: 0, h: 0, i: 0 };
+      putCached('F' + row, z.f); putCached('G' + row, z.g); putCached('H' + row, z.h); putCached('I' + row, z.i);
+    }
+    putCached('G37', info.tot.g); putCached('H37', info.tot.h); putCached('I37', info.tot.i);
+    x = x.replace('topLeftCell="A16"', 'topLeftCell="A1"').replace('activeCell="H36"', 'activeCell="C4"').replace('sqref="H36"', 'sqref="C4"');
+    zip.file('xl/worksheets/sheet1.xml', x);
+
+    let wb = await zip.file('xl/workbook.xml').async('string');
+    wb = wb.replace('<calcPr ', '<calcPr fullCalcOnLoad="1" ');
+    zip.file('xl/workbook.xml', wb);
+    return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
+  }
+
+  function reportNames(month, name) {
+    const [y, m] = month.split('-').map(Number);
+    const en = new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long' });
+    const base = name.replace(/[\\/:*?"<>|]/g, '').trim() + ' – ' + en + ' ' + y;
+    return { file: base + '.xlsx', subject: base };
+  }
+
+  function exportModal() {
+    const info = buildMonthRows(ui.month);
+    const st = data.settings;
+    const warn = info.open.length ? `<div class="banner" style="margin-bottom:12px"><span>There is an open shift on ${info.open.map(k => k.slice(8) + '/' + k.slice(5, 7)).join(', ')}. It will not be included in the report until you close it.</span></div>` : '';
+    openModal(`
+      <h3>Hours report – ${fmtMonth(ui.month)}</h3>
+      ${warn}
+      <div class="field"><label>Employee name</label><input type="text" id="xName" value="${esc(st.name)}"></div>
+      <div class="stats" style="grid-template-columns:repeat(2,1fr)">
+        <div class="stat"><div class="k">Days worked</div><div class="v">${info.worked}</div></div>
+        <div class="stat"><div class="k">Total hours</div><div class="v">${info.tot.f.toFixed(2)}</div></div>
+        <div class="stat"><div class="k">Regular / 125%</div><div class="v">${info.tot.g.toFixed(1)} / ${info.tot.h.toFixed(1)}</div></div>
+        <div class="stat"><div class="k">150%</div><div class="v">${info.tot.i.toFixed(1)}</div></div>
+      </div>
+      <div id="xErr" class="hint" style="color:var(--out);min-height:20px"></div>
+      <div class="actions">
+        <button class="btn" id="xDownload">Download file</button>
+        <button class="btn ghost" id="xShare">${st.email ? 'Send to ' + esc(st.email) : 'Share'}</button>
+        <button class="btn ghost" id="xClose">Close</button>
+      </div>
+      <div class="hint" style="margin-top:12px">The file is built from the Torah Live hours template. Its calculations update automatically when opened in Excel.</div>`);
+    const getName = () => { const n = $('xName').value.trim(); if (!n) { $('xErr').textContent = 'Employee name is required'; return null; } data.settings.name = n; save(); return n; };
+    const build = async () => {
+      const n = getName(); if (!n) return null;
+      try { const blob = await makeXlsx(ui.month, n); const nm = reportNames(ui.month, n); return { blob, nm }; }
+      catch (e) { $('xErr').textContent = e.message === 'nolib' ? 'The export component did not load. Check your connection and reload the page.' : 'Could not create the file: ' + e.message; return null; }
+    };
+    $('xClose').onclick = closeModal;
+    $('xDownload').onclick = async () => { const r = await build(); if (r) download(r.nm.file, r.blob, r.blob.type); };
+    $('xShare').onclick = async () => {
+      const r = await build(); if (!r) return;
+      const file = new File([r.blob], r.nm.file, { type: r.blob.type });
+      try {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: r.nm.subject }); return; }
+      } catch (e) { if (e && e.name === 'AbortError') return; }
+      download(r.nm.file, r.blob, r.blob.type);
+      window.location.href = 'mailto:' + encodeURIComponent(data.settings.email || '') + '?subject=' + encodeURIComponent(r.nm.subject) + '&body=' + encodeURIComponent('Hi,\nAttached is my hours report for ' + fmtMonth(ui.month) + '.\n(Please attach the downloaded file: ' + r.nm.file + ')');
+    };
+  }
+
+
+  // ---------- Optional cloud sync: Google sign-in + the user's OWN Google Drive ----------
+  // Hours are stored in a hidden app folder inside each person's own Google Drive (scope drive.appdata).
+  // There is no server and no database owned by whoever hosts the app, so nobody else can read the data.
+  // Local data stays the source of truth; every cycle merges the cloud file into it ("last change wins"
+  // per record) and writes the merged result back.
+  const SC = window.SYNC_CONFIG;
+  const SCOPE = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email';
+  const CLOUD_FILE = 'timeclock-data.json';
+  const sync = { state: SC ? (SC.googleClientId ? 'signedout' : 'notconfigured') : 'none', account: null, last: null, err: '', token: null, exp: 0, busy: false, requesting: false, nextAsk: 0, timer: null };
+  let tokenClient = null;
+  const sdkReady = () => !!(window.google && google.accounts && google.accounts.oauth2);
+  const tokenValid = () => !!sync.token && Date.now() < sync.exp - 60000;
+
+  // --- record bookkeeping ---
+  function touch(key, deleted, u) {
+    const m = data.meta; m.u[key] = u || Date.now();
+    if (deleted) m.del[key] = 1; else delete m.del[key];
+    m.dirty[key] = 1;
+  }
+  function markDiff(before) {
+    const old = {}, cur = {};
+    before.forEach(x => { old[x.id] = JSON.stringify(x); });
+    data.shifts.forEach(x => { cur[x.id] = JSON.stringify(x); });
+    Object.keys(cur).forEach(id => { if (old[id] !== cur[id]) touch('s_' + id); });
+    Object.keys(old).forEach(id => { if (!(id in cur)) touch('s_' + id, true); });
+  }
+  function docFor(key) {
+    const u = data.meta.u[key] || 0;
+    if (key === 'cfg') return { t: 'c', settings: JSON.parse(JSON.stringify(data.settings)), d: false, u };
+    if (key.indexOf('s_') === 0) {
+      const id = key.slice(2), sh = data.shifts.find(x => x.id === id);
+      return sh ? { t: 's', id, start: sh.start, end: sh.end == null ? null : sh.end, note: sh.note || '', d: false, u } : { t: 's', id, d: true, u };
+    }
+    const date = key.slice(2), text = data.dayNotes[date];
+    return text ? { t: 'n', date, text, d: false, u } : { t: 'n', date, d: true, u };
+  }
+  function applyRemote(key, r) {
+    const m = data.meta;
+    if (!r || typeof r.u !== 'number' || r.u <= (m.u[key] || 0)) return false;
+    if (r.t === 's') {
+      data.shifts = data.shifts.filter(x => x.id !== r.id);
+      if (r.d) m.del[key] = 1;
+      else { data.shifts.push({ id: r.id, start: r.start, end: r.end == null ? null : r.end, note: r.note || '' }); delete m.del[key]; }
+    } else if (r.t === 'n') {
+      if (r.d) delete data.dayNotes[r.date]; else data.dayNotes[r.date] = r.text;
+    } else if (r.t === 'c' && r.settings) {
+      Object.assign(data.settings, r.settings);
+    } else return false;
+    m.u[key] = r.u; delete m.dirty[key];
+    return true;
+  }
+  function refreshAfterRemote() {
+    const a = document.activeElement;
+    if ($('overlay') || (a && /^(INPUT|TEXTAREA)$/.test(a.tagName))) return;
+    render();
+  }
+
+  // --- Google Drive (appDataFolder) ---
+  async function drive(path, opts) {
+    const o = opts || {};
+    const r = await fetch('https://www.googleapis.com' + path, Object.assign({}, o, { headers: Object.assign({ Authorization: 'Bearer ' + sync.token }, o.headers || {}) }));
+    if (r.status === 401) { sync.token = null; sync.exp = 0; const e = new Error('Google session expired'); e.auth = true; throw e; }
+    if (!r.ok) throw new Error('Google Drive error ' + r.status);
+    return r;
+  }
+  async function listCloudFiles() {
+    const r = await drive('/drive/v3/files?spaces=appDataFolder&pageSize=10&fields=' + encodeURIComponent('files(id)') + '&q=' + encodeURIComponent("name='" + CLOUD_FILE + "'"));
+    return (await r.json()).files || [];
+  }
+  async function readCloudFile(id) {
+    const r = await drive('/drive/v3/files/' + id + '?alt=media');
+    let j; try { j = JSON.parse(await r.text()); } catch (e) { j = null; }
+    if (!j || typeof j.records !== 'object') throw new Error('The cloud file could not be read, so nothing was overwritten.');
+    return j;
+  }
+  async function writeCloudFile(id, obj) {
+    const body = JSON.stringify(obj);
+    if (id) { await drive('/upload/drive/v3/files/' + id + '?uploadType=media', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body }); return; }
+    const b = 'tcb' + Date.now();
+    const meta = JSON.stringify({ name: CLOUD_FILE, parents: ['appDataFolder'], mimeType: 'application/json' });
+    const mp = '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + meta + '\r\n--' + b + '\r\nContent-Type: application/json\r\n\r\n' + body + '\r\n--' + b + '--';
+    await drive('/upload/drive/v3/files?uploadType=multipart', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body: mp });
+  }
+  async function syncCycle() {
+    if (sync.busy || !sync.account || !SC || !SC.googleClientId) return;
+    if (!navigator.onLine) { sync.state = 'offline'; updateSyncUI(); return; }
+    if (!tokenValid()) { sync.state = 'needtoken'; updateSyncUI(); return; }
+    sync.busy = true; if (sync.state !== 'synced') sync.state = 'syncing'; updateSyncUI();
+    try {
+      const files = await listCloudFiles(), remote = {};
+      for (const f of files) {
+        const j = await readCloudFile(f.id);
+        Object.keys(j.records).forEach(k => { const r = j.records[k]; if (!remote[k] || r.u > remote[k].u) remote[k] = r; });
+      }
+      let changed = false;
+      Object.keys(remote).forEach(k => { if (applyRemote(k, remote[k])) changed = true; });
+      const out = {}, snapU = Object.assign({}, data.meta.u), cutoff = Date.now() - 180 * 864e5;
+      let need = files.length > 1;
+      Object.keys(data.meta.u).forEach(k => {
+        const d = docFor(k); if (d.d && d.u < cutoff) return;         // forget very old deletions
+        out[k] = d; const r = remote[k]; if (!r || r.u < d.u) need = true;
+      });
+      if (need) {
+        await writeCloudFile(files[0] && files[0].id, { v: 1, records: out });
+        for (const f of files.slice(1)) await drive('/drive/v3/files/' + f.id, { method: 'DELETE' });
+      }
+      Object.keys(snapU).forEach(k => { if (data.meta.u[k] === snapU[k]) delete data.meta.dirty[k]; });
+      if (changed) refreshAfterRemote();
+      sync.state = 'synced'; sync.last = Date.now(); sync.err = '';
+    } catch (e) {
+      if (e.auth) sync.state = 'needtoken'; else { sync.state = navigator.onLine ? 'error' : 'offline'; sync.err = (e && e.message) || String(e); }
+    }
+    sync.busy = false; store.set(data); updateSyncUI();
+  }
+  function queueSync() { if (!sync.account) return; clearTimeout(sync.timer); sync.timer = setTimeout(syncCycle, 2500); }
+
+  // --- Google sign-in (token flow) ---
+  function loadGis() {
+    return new Promise(resolve => {
+      if (sdkReady()) return resolve(true);
+      const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+      s.onload = () => resolve(sdkReady()); s.onerror = () => { s.remove(); resolve(false); };
+      document.head.appendChild(s);
+    });
+  }
+  function makeClient() {
+    if (tokenClient || !sdkReady()) return;
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: SC.googleClientId, scope: SCOPE, callback: onToken,
+      error_callback: () => { sync.requesting = false; sync.nextAsk = Date.now() + 5 * 60000; }
+    });
+  }
+  function requestToken() {                       // must run inside a tap / click
+    makeClient();
+    if (!tokenClient) { alert('Could not reach Google. Check your connection and try again.'); return; }
+    sync.requesting = true; tokenClient.requestAccessToken({ prompt: '' });
+  }
+  async function onToken(resp) {
+    sync.requesting = false;
+    if (!resp || resp.error || !resp.access_token) return;
+    if (!google.accounts.oauth2.hasGrantedAllScopes(resp, 'https://www.googleapis.com/auth/drive.appdata')) {
+      alert('To sync, please allow access to the app’s private folder in your Google Drive.'); return;
+    }
+    sync.token = resp.access_token; sync.exp = Date.now() + (parseInt(resp.expires_in, 10) || 3600) * 1000;
+    if (sync.account) { syncCycle(); return; }
+    try {
+      const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + sync.token } });
+      const j = await r.json(); await adopt({ sub: j.sub, email: j.email });
+    } catch (e) { sync.state = 'error'; sync.err = e.message; updateSyncUI(); }
+  }
+  function wipeLocal() {
+    data.shifts = []; data.dayNotes = {}; data.settings = defSettings();
+    data.meta = { u: {}, del: {}, dirty: {}, uid: null, account: null }; undoSnap = null; prevShifts = null;
+  }
+  function afterAuthUI() { render(); if ($('sSave')) settingsModal(); }
+  async function adopt(acc) {
+    if (data.meta.uid && data.meta.uid !== acc.sub) {
+      if (!confirm('This device still holds hours from a different Google account. Replace them with the data of ' + acc.email + '?')) { sync.token = null; sync.exp = 0; return; }
+      wipeLocal();
+    }
+    data.meta.uid = acc.sub; data.meta.account = acc; sync.account = acc; sync.state = 'syncing';
+    // First sign-in: whatever this device already holds is uploaded (lowest priority, so cloud data wins conflicts).
+    data.shifts.forEach(x => { if (!(('s_' + x.id) in data.meta.u)) touch('s_' + x.id, false, 1); });
+    Object.keys(data.dayNotes).forEach(k => { if (!(('n_' + k) in data.meta.u)) touch('n_' + k, false, 1); });
+    if (!('cfg' in data.meta.u)) touch('cfg', false, 1);
+    store.set(data); render();
+    await syncCycle(); afterAuthUI();
+  }
+  function initSync() {
+    if (!SC || !SC.googleClientId) return;
+    if (data.meta.account) { sync.account = data.meta.account; sync.state = 'needtoken'; }
+    loadGis().then(ok => { if (ok) makeClient(); });
+    // A Google access token lasts one hour; renewing it needs a tap, so renew on the next click.
+    document.addEventListener('click', () => {
+      if (sync.account && !tokenValid() && !sync.requesting && Date.now() > sync.nextAsk && tokenClient) requestToken();
+    }, true);
+    window.addEventListener('online', () => { loadGis().then(ok => { if (ok) makeClient(); }); syncCycle(); });
+    window.addEventListener('offline', () => { if (sync.account) { sync.state = 'offline'; updateSyncUI(); } });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncCycle(); });
+    setInterval(() => { if (!document.hidden) syncCycle(); }, 60000);
+    updateSyncUI();
+  }
+  function signOut(clear) {
+    if (clear && Object.keys(data.meta.dirty).length && !confirm('Some changes are not synced yet and would be lost. Continue?')) return;
+    sync.token = null; sync.exp = 0; sync.account = null; data.meta.account = null; sync.state = 'signedout';
+    if (clear) wipeLocal();
+    store.set(data); afterAuthUI();
+  }
+
+  // --- UI ---
+  function syncText() {
+    return {
+      signedout: 'Device only · tap to sign in and sync',
+      needtoken: '☁ Tap to reconnect to Google',
+      synced: '☁ Synced' + (sync.last ? ' ' + tkey(sync.last) : ''),
+      syncing: '☁ Syncing…',
+      offline: '☁ Offline – will sync when connected',
+      error: '☁ Sync problem – tap for details'
+    }[sync.state] || '';
+  }
+  function updateSyncUI() {
+    const l = $('syncLine'); if (l) l.textContent = syncText();
+    const t = $('syncStatus'); if (t) t.textContent = syncText() + (sync.state === 'error' && sync.err ? ' (' + sync.err + ')' : '');
+  }
+  function syncSection() {
+    if (sync.state === 'none') return '';
+    let body;
+    if (sync.state === 'notconfigured') body = '<div class="hint">Cloud sync is not switched on in this copy of the app, so your hours stay on this device. See the README to turn it on.</div>';
+    else if (!sync.account) body = '<div class="actions" style="margin:0"><button class="btn" id="syncIn">Sign in with Google</button></div><div class="hint">See the same hours on your phone, tablet and computer. Your hours are saved in a hidden app folder in your own Google Drive. Nobody else can read them, and you can always recover them by signing in to your Google account.</div>';
+    else body = '<div style="font-weight:600;margin-bottom:6px">' + esc(sync.account.email) + '</div><div class="hint" id="syncStatus" style="margin:0 0 10px"></div><div class="actions" style="margin:0">' +
+      (sync.state === 'needtoken' ? '<button class="btn" id="syncReconnect">Reconnect</button>' : '<button class="btn ghost" id="syncNow">Sync now</button>') +
+      '<button class="btn ghost" id="syncOut">Sign out</button><button class="btn danger" id="syncOutClear">Sign out &amp; clear this device</button></div>' +
+      '<div class="hint" style="margin-top:10px">Stored in your own Google Drive (hidden app folder). To remove it: Google Account → Drive → Manage apps.</div>';
+    return '<div class="field"><label>Cloud sync</label>' + body + '</div>';
+  }
+  function bindSync() {
+    const a = $('syncIn'); if (a) a.onclick = requestToken;
+    const b = $('syncNow'); if (b) b.onclick = () => { if (tokenValid()) syncCycle(); else requestToken(); };
+    const r = $('syncReconnect'); if (r) r.onclick = requestToken;
+    const c = $('syncOut'); if (c) c.onclick = () => signOut(false);
+    const d = $('syncOutClear'); if (d) d.onclick = () => signOut(true);
+    updateSyncUI();
+  }
+
+  // ---------- Live tick ----------
+  setInterval(() => {
+    const now = Date.now(), o = openShift();
+    const t = $('timer'); if (!t) return;
+    t.textContent = o ? hms(now - o.start) : fmtClock(now);
+    const tt = $('todayTotal'); if (tt) tt.textContent = hm(dayTotal(dkey(now), now));
+    const dt = $('dayTotal'); if (dt) dt.textContent = hm(dayTotal(ui.day, now));
+    document.querySelectorAll('[data-live]').forEach(el => { if (o) el.textContent = hm(now - o.start); });
+  }, 1000);
+
+  // Re-render when the app returns to the foreground (tablet wake-up)
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !$('overlay')) render(); });
+
+  try { if ('serviceWorker' in navigator && /^https?:/.test(location.protocol)) navigator.serviceWorker.register('sw.js'); } catch (e) {}
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  // ---------- Init ----------
+  store.get().then(d => {
+    if (d && Array.isArray(d.shifts)) data = { shifts: d.shifts, dayNotes: d.dayNotes || {}, meta: Object.assign({ u: {}, del: {}, dirty: {}, uid: null, account: null }, d.meta), settings: Object.assign(data.settings, d.settings) };
+    render();
+    initSync();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
