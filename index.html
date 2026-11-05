@@ -125,6 +125,47 @@
   .bar i.over { background: var(--purple-bright); }
   .day-row .h { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; direction: ltr; }
   .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  .vtoggle { display: flex; gap: 4px; background: var(--raised); padding: 4px; border-radius: 9999px; width: max-content; margin: 0 0 14px auto; }
+  .vtoggle button { display: flex; align-items: center; gap: 8px; padding: 8px 18px; border-radius: 9999px; font-weight: 600; font-size: 16px; color: var(--ink-70); min-height: 44px; transition: color .15s var(--ease); }
+  .vtoggle button:hover { color: var(--white); }
+  .vtoggle button.active { background: var(--white); color: var(--gray-900); }
+  .vtoggle svg { width: 18px; height: 18px; flex: none; }
+
+  /* ---- Month calendar ---- */
+  .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) minmax(0, .95fr); gap: 6px; }
+  .cal-h { text-align: center; font-size: 14px; font-weight: 600; color: var(--ink-65); padding: 0 0 2px; }
+  .cal-d { position: relative; display: flex; flex-direction: column; gap: 4px; min-height: 78px; padding: 8px; border-radius: 12px; text-align: left;
+    background: var(--veil); box-shadow: inset 0 0 0 1px var(--hairline); transition: background .15s var(--ease); }
+  .cal-d:hover { background: #ffffff14; }
+  .cal-d .n { font-size: 15px; font-weight: 700; color: var(--ink-65); }
+  .cal-d.has .n { color: var(--white); }
+  .cal-d .ch { margin-top: auto; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+  .cal-d .ch.live { color: var(--teal); }
+  .cal-d .bar { height: 5px; }
+  .cal-d.off { background: transparent; }
+  .cal-d.off .n { color: #ffffff59; }
+  .cal-d.today { box-shadow: inset 0 0 0 2px var(--white); }
+  .cal-d.today .n { color: var(--white); }
+  .cal-d .dot { position: absolute; top: 11px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--yellow); }
+  .cal-w { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 12px; background: var(--raised);
+    font-weight: 800; font-size: 16px; font-variant-numeric: tabular-nums; direction: ltr; }
+  .cal-w.zero { color: var(--ink-65); font-weight: 600; }
+  .cal-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font-size: 14px; color: var(--ink-65); }
+  .cal-legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .cal-legend i { display: inline-block; width: 18px; height: 6px; border-radius: 9999px; background: var(--mint); }
+  .cal-legend i.over { background: var(--purple-bright); }
+  .cal-legend i.note { width: 8px; height: 8px; background: var(--yellow); }
+  @media (max-width: 520px) {
+    .cal { gap: 4px; }
+    .cal-h { font-size: 12px; }
+    .cal-d { min-height: 60px; padding: 6px 3px; align-items: center; text-align: center; gap: 3px; }
+    .cal-d .n { font-size: 13px; }
+    .cal-d .ch { font-size: 13px; letter-spacing: -0.03em; }
+    .cal-d .bar { width: 80%; height: 4px; }
+    .cal-d .dot { top: 6px; right: 5px; width: 6px; height: 6px; }
+    .cal-w { font-size: 12px; }
+    .vtoggle { width: 100%; } .vtoggle button { flex: 1; justify-content: center; }
+  }
 
   /* ---- Buttons: fully rounded, label 600 ---- */
   .btn { padding: 12px 24px; border-radius: 9999px; background: var(--red); color: var(--white); font-weight: 600; font-size: 18px; min-height: 52px; transition: background .15s var(--ease); }
@@ -172,7 +213,7 @@
     :root { color-scheme: light; --canvas-alt: #fff; --white: #000; --ink-80: #222; --ink-70: #444; --ink-65: #555; --hairline: #ccc; --outline: #999; --veil: #f3f3f3; --raised: #eee; --gray-900: #000; --teal: #0a7a5a; --red-bright: #c00; }
     body { background: #fff !important; color: #000; }
     .card { box-shadow: none; border: 1px solid #ccc; }
-    .big-btn, .gear, .toast, .links, .actions, .add-btn, #syncLine { display: none !important; }
+    .big-btn, .gear, .toast, .links, .actions, .add-btn, #syncLine, .vtoggle, .cal-legend { display: none !important; }
     .grad { color: #000; background: none; }
     .brand .logo { display: none; }
   }
@@ -205,7 +246,8 @@
   const IL = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Jerusalem'; } catch (e) { return false; } })();
   const defSettings = () => ({ target: 8, rate: 0, currency: IL ? '₪' : '$', workdays: IL ? [0, 1, 2, 3, 4] : [1, 2, 3, 4, 5], name: '', email: '', autoBreak: 0 });
   let data = { shifts: [], dayNotes: {}, meta: { u: {}, del: {}, dirty: {}, uid: null, account: null }, settings: defSettings() };
-  let ui = { tab: 'day', day: dkey(Date.now()), month: dkey(Date.now()).slice(0, 7) };
+  const MVIEW_KEY = 'timeclock-monthview';   // per-device display preference only (not part of synced data)
+  let ui = { tab: 'day', day: dkey(Date.now()), month: dkey(Date.now()).slice(0, 7), mview: (() => { try { return localStorage.getItem(MVIEW_KEY) === 'list' ? 'list' : 'cal'; } catch (e) { return 'cal'; } })() };
   let undoSnap = null, toastTimer = null, prevShifts = null;
 
   // ---------- Helpers ----------
@@ -322,6 +364,7 @@
     const days = new Date(y, m, 0).getDate();
     const st = data.settings, targetMs = st.target * 3600000;
     let total = 0, worked = 0, expected = 0, rows = '';
+    const cells = [];
     for (let d = 1; d <= days; d++) {
       const key = ui.month + '-' + pad(d);
       const wd = new Date(key + 'T12:00').getDay();
@@ -331,6 +374,7 @@
       if (isWork && key <= today) expected += targetMs;
       const pct = targetMs > 0 ? Math.min(100, t / targetMs * 100) : (t > 0 ? 100 : 0);
       const name = new Date(key + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' }) + ' ' + d;
+      cells.push({ key, d, wd, isWork, t, pct });
       rows += `<button class="day-row ${key === today ? 'today' : ''} ${!isWork && t === 0 ? 'off' : ''}" data-open="${key}">
         <span class="d">${name}</span>
         <span class="bar"><i class="${t > targetMs ? 'over' : ''}" style="width:${pct}%"></i></span>
@@ -352,12 +396,44 @@
         <div class="stat"><div class="k">${diff >= 0 ? 'Hours ahead' : 'Hours short'}</div><div class="v ${diff >= 0 ? 'pos' : 'neg'}">${hm(Math.abs(diff))}</div></div>
         ${pay > 0 ? `<div class="stat"><div class="k">Estimated pay</div><div class="v">${st.currency || ''}${Math.round(pay).toLocaleString('en-GB')}</div></div>` : `<div class="stat"><div class="k">Target so far</div><div class="v">${hm(expected)}</div></div>`}
       </div>
-      ${rows}
+      <div class="vtoggle" role="group" aria-label="Month view">
+        <button data-mview="cal" class="${ui.mview === 'cal' ? 'active' : ''}" aria-pressed="${ui.mview === 'cal'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>Calendar</button>
+        <button data-mview="list" class="${ui.mview === 'list' ? 'active' : ''}" aria-pressed="${ui.mview === 'list'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>List</button>
+      </div>
+      ${ui.mview === 'cal' ? calendarGrid(cells, today, now, targetMs) : rows}
       <div class="actions">
         <button class="btn light" id="exportXlsx">Hours report (Excel)</button>
         <button class="btn ghost" id="exportCsv">CSV</button>
         <button class="btn ghost" id="printBtn">Print</button>
       </div>`;
+  }
+
+  // Calendar grid for the monthly tab. Week starts on Sunday when Sunday is a work day (e.g. Israel), otherwise Monday.
+  function calendarGrid(cells, today, now, targetMs) {
+    const ws = data.settings.workdays.includes(0) ? 0 : 1;
+    const o = openShift(), liveKey = o ? dkey(o.start) : null;
+    let html = '';
+    for (let i = 0; i < 7; i++) html += `<div class="cal-h">${new Date(2024, 0, 7 + ((ws + i) % 7), 12).toLocaleDateString('en-GB', { weekday: 'short' })}</div>`;
+    html += '<div class="cal-h">Week</div>';
+    const lead = (cells[0].wd - ws + 7) % 7;
+    const slots = Array(lead).fill(null).concat(cells);
+    while (slots.length % 7) slots.push(null);
+    for (let r = 0; r < slots.length; r += 7) {
+      let wk = 0;
+      for (const c of slots.slice(r, r + 7)) {
+        if (!c) { html += '<div aria-hidden="true"></div>'; continue; }
+        wk += c.t;
+        const note = data.dayNotes[c.key] || '';
+        const label = fmtDay(c.key) + (c.t > 0 ? ', ' + hm(c.t) + ' hours' : '') + (note ? ', note: ' + note : '');
+        html += `<button class="cal-d ${c.key === today ? 'today' : ''} ${!c.isWork && c.t === 0 ? 'off' : ''} ${c.t > 0 ? 'has' : ''}" data-open="${c.key}" aria-label="${esc(label)}"${note ? ' title="' + esc(note) + '"' : ''}>
+          <span class="n">${c.d}</span>${note ? '<span class="dot"></span>' : ''}
+          <span class="ch ${c.key === liveKey ? 'live' : ''}">${c.t > 0 ? hm(c.t) : ''}</span>
+          ${c.t > 0 ? `<span class="bar"><i class="${c.t > targetMs ? 'over' : ''}" style="width:${c.pct}%"></i></span>` : ''}</button>`;
+      }
+      html += `<div class="cal-w ${wk ? '' : 'zero'}" aria-label="Week total ${hm(wk)}">${wk ? hm(wk) : '–'}</div>`;
+    }
+    return `<div class="cal">${html}</div>
+      <div class="cal-legend"><span><i></i>Up to daily target</span><span><i class="over"></i>Over target</span><span><i class="note"></i>Day note</span><span>Tap a day to open it</span></div>`;
   }
 
   function bind() {
@@ -370,6 +446,7 @@
     document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { ui.tab = b.dataset.tab; if (ui.tab === 'month') ui.month = ui.day.slice(0, 7); render(); });
     document.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { ui.day = addDays(ui.day, +b.dataset.day); render(); });
     document.querySelectorAll('[data-month]').forEach(b => b.onclick = () => { ui.month = addMonths(ui.month, +b.dataset.month); render(); });
+    document.querySelectorAll('[data-mview]').forEach(b => b.onclick = () => { ui.mview = b.dataset.mview; try { localStorage.setItem(MVIEW_KEY, ui.mview); } catch (e) {} render(); });
     document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editShift(b.dataset.edit));
     document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { ui.day = b.dataset.open; ui.tab = 'day'; render(); });
     const dn = $('dayNote'); if (dn) dn.onchange = () => { const v = dn.value.trim(); if (v) data.dayNotes[ui.day] = v; else delete data.dayNotes[ui.day]; touch('n_' + ui.day, !v); save(); };
