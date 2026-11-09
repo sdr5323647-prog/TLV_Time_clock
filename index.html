@@ -1009,7 +1009,9 @@
     if (!sheetWanted()) return 'Off. An existing backup sheet stays in your Drive until you delete it.';
     if (data.meta.sheetDeclined || (tokenValid() && !sync.sheetOk)) return 'Google permission for the backup sheet was not given.';
     if (sheet.state === 'saving') return 'Saving backup…';
-    if (sheet.state === 'error') return 'Backup sheet problem: ' + sheet.err;
+    if (sheet.state === 'error') return /Sheets API has not been used|SERVICE_DISABLED|is disabled/i.test(sheet.err)
+      ? 'Backup sheet not active yet: the Google Sheets API is not enabled for this app. The app will retry automatically.'
+      : 'Backup sheet problem: ' + sheet.err;
     if (sb && sb.last) return 'Backed up ' + (dkey(sb.last) === dkey(Date.now()) ? 'today' : fmtDay(dkey(sb.last))) + ' at ' + tkey(sb.last) + '.';
     return 'The sheet is created in your Drive at the next sync.';
   }
@@ -1032,7 +1034,7 @@
       '<div class="hint" style="margin-top:10px">Stored in your own Google Drive (hidden app folder). To remove it: Google Account → Drive → Manage apps.</div>' +
       '<div class="sheet-box"><label class="check"><input type="checkbox" id="sheetOn" ' + (sheetWanted() ? 'checked' : '') + '>Backup copy in Google Sheets</label>' +
       '<div class="hint" style="margin:0 0 10px">A spreadsheet named “' + SHEET_NAME + '” in your own Drive, with one row per shift. It is updated automatically after every change, so your hours are safe even if this device or the app fails.</div>' +
-      '<div class="hint" id="sheetStatus" style="margin:0 0 10px"></div>' +
+      '<div class="hint" id="sheetStatus" style="margin:0 0 10px;overflow-wrap:anywhere"></div>' +
       '<div class="actions" style="margin:0"><a class="btn ghost" id="sheetOpen" target="_blank" rel="noopener" hidden>Open backup sheet</a><button class="btn ghost" id="sheetAllow" hidden>Allow access</button></div></div>';
     return '<div class="field"><label>Cloud sync</label>' + body + '</div>';
   }
