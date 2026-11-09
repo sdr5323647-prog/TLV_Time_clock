@@ -176,6 +176,10 @@
   .btn.light:hover { background: var(--gray-100); }
   .btn.danger { background: transparent; color: var(--red-bright); box-shadow: inset 0 0 0 2px rgba(255,45,94,.55); }
   .btn.danger:hover { background: rgba(255,45,94,.12); }
+  a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+  .field label.check { display: flex; align-items: center; gap: 12px; min-height: 44px; margin: 0; color: var(--white); font-size: 18px; font-weight: 600; cursor: pointer; }
+  .field .check input { width: 22px; height: 22px; min-height: 0; padding: 0; margin: 0; box-shadow: none; accent-color: var(--mint); flex: none; }
+  .sheet-box { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
 
   /* ---- Modal ---- */
   .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.72); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
@@ -244,7 +248,7 @@
 
   // ---------- State ----------
   const IL = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Jerusalem'; } catch (e) { return false; } })();
-  const defSettings = () => ({ target: 8, rate: 0, currency: IL ? '₪' : '$', workdays: IL ? [0, 1, 2, 3, 4] : [1, 2, 3, 4, 5], name: '', email: '', autoBreak: 0 });
+  const defSettings = () => ({ target: 8, rate: 0, currency: IL ? '₪' : '$', workdays: IL ? [0, 1, 2, 3, 4] : [1, 2, 3, 4, 5], name: '', email: '', autoBreak: 0, sheetBackup: true });
   let data = { shifts: [], dayNotes: {}, meta: { u: {}, del: {}, dirty: {}, uid: null, account: null }, settings: defSettings() };
   const MVIEW_KEY = 'timeclock-monthview';   // per-device display preference only (not part of synced data)
   let ui = { tab: 'day', day: dkey(Date.now()), month: dkey(Date.now()).slice(0, 7), mview: (() => { try { return localStorage.getItem(MVIEW_KEY) === 'list' ? 'list' : 'cal'; } catch (e) { return 'cal'; } })() };
@@ -715,8 +719,11 @@
   // There is no server and no database owned by whoever hosts the app, so nobody else can read the data.
   // Local data stays the source of truth; every cycle merges the cloud file into it ("last change wins"
   // per record) and writes the merged result back.
+  // In addition (scope drive.file, on by default) a readable backup copy is kept in a Google Sheet in the same Drive.
   const SC = window.SYNC_CONFIG;
-  const SCOPE = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email';
+  const BASE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email';
+  const SHEET_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  const scopeNow = () => BASE_SCOPE + (sheetWanted() && !data.meta.sheetDeclined ? ' ' + SHEET_SCOPE : '');
   const CLOUD_FILE = 'timeclock-data.json';
   const sync = { state: SC ? (SC.googleClientId ? 'signedout' : 'notconfigured') : 'none', account: null, last: null, err: '', token: null, exp: 0, busy: false, requesting: false, nextAsk: 0, timer: null };
   let tokenClient = null;
@@ -768,13 +775,17 @@
   }
 
   // --- Google Drive (appDataFolder) ---
-  async function drive(path, opts) {
+  async function gfetch(url, opts) {
     const o = opts || {};
-    const r = await fetch('https://www.googleapis.com' + path, Object.assign({}, o, { headers: Object.assign({ Authorization: 'Bearer ' + sync.token }, o.headers || {}) }));
+    const r = await fetch(url, Object.assign({}, o, { headers: Object.assign({ Authorization: 'Bearer ' + sync.token }, o.headers || {}) }));
     if (r.status === 401) { sync.token = null; sync.exp = 0; const e = new Error('Google session expired'); e.auth = true; throw e; }
-    if (!r.ok) throw new Error('Google Drive error ' + r.status);
+    if (!r.ok) {
+      let m = ''; try { m = ((await r.json()).error || {}).message || ''; } catch (x) {}
+      const e = new Error('Google ' + (url.indexOf('//sheets.') > 0 ? 'Sheets' : 'Drive') + ' error ' + r.status + (m ? ': ' + m : '')); e.status = r.status; throw e;
+    }
     return r;
   }
+  function drive(path, opts) { return gfetch('https://www.googleapis.com' + path, opts); }
   async function listCloudFiles() {
     const r = await drive('/drive/v3/files?spaces=appDataFolder&pageSize=10&fields=' + encodeURIComponent('files(id)') + '&q=' + encodeURIComponent("name='" + CLOUD_FILE + "'"));
     return (await r.json()).files || [];
@@ -793,6 +804,84 @@
     const mp = '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + meta + '\r\n--' + b + '\r\nContent-Type: application/json\r\n\r\n' + body + '\r\n--' + b + '--';
     await drive('/upload/drive/v3/files?uploadType=multipart', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body: mp });
   }
+  // --- Backup copy in a Google Sheet (scope drive.file: the app can only see files it created itself) ---
+  // One spreadsheet per Google account, found again from any device by its appProperties tag.
+  // It is a one-way, human-readable copy: rewritten from local data after a sync whenever something changed. Never read back.
+  const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets/';
+  const SHEET_NAME = 'Time Clock – backup', SHEET_TAG = 'timeclockBackup', SHEET_TABS = ['Shifts', 'Day notes', 'About'];
+  const sheet = { state: 'idle', err: '', verified: false, retryAt: 0 };
+  function sheetWanted() { return data.settings.sheetBackup !== false; }
+  function sheetHash(str) { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0; return h.toString(36) + '.' + str.length; }
+  function sheetRows() {
+    const wd = k => new Date(k + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' });
+    const shifts = data.shifts.slice().sort((a, b) => a.start - b.start).map(x => {
+      const k = dkey(x.start), open = x.end == null;
+      return [k, wd(k), tkey(x.start), open ? 'On shift' : tkey(x.end) + (dkey(x.end) !== k ? ' (+1 day)' : ''),
+        open ? '' : hm(x.end - x.start), open ? '' : Math.round((x.end - x.start) / 36000) / 100, x.note || ''];
+    });
+    const notes = Object.keys(data.dayNotes).sort().map(k => [k, wd(k), data.dayNotes[k]]);
+    return { shifts, notes };
+  }
+  const JSON_HDR = { 'Content-Type': 'application/json' };
+  async function sheetLocate() {
+    const sb = data.meta.sheet;
+    if (sb && sb.id && sb.uid === data.meta.uid) {
+      try { const j = await (await drive('/drive/v3/files/' + sb.id + '?fields=id,trashed,webViewLink')).json(); if (!j.trashed) return j; }
+      catch (e) { if (e.auth || e.status !== 404) throw e; }
+    }
+    const q = "appProperties has { key='" + SHEET_TAG + "' and value='1' } and trashed=false";
+    const found = ((await (await drive('/drive/v3/files?pageSize=10&orderBy=createdTime&fields=' + encodeURIComponent('files(id,webViewLink)') + '&q=' + encodeURIComponent(q))).json()).files || [])[0];
+    if (found) return found;
+    return (await drive('/drive/v3/files?fields=id,webViewLink', { method: 'POST', headers: JSON_HDR,
+      body: JSON.stringify({ name: SHEET_NAME, mimeType: 'application/vnd.google-apps.spreadsheet', appProperties: { [SHEET_TAG]: '1' } }) })).json();
+  }
+  async function sheetTabs(id) {
+    const props = ((await (await gfetch(SHEETS_API + id + '?fields=' + encodeURIComponent('sheets.properties(sheetId,title)'))).json()).sheets || []).map(x => x.properties);
+    const have = t => props.some(p => p.title === t), reqs = [], fmt = [];
+    const blank = props.length === 1 && !SHEET_TABS.some(have) ? props[0] : null;   // brand-new file: rename its default tab
+    SHEET_TABS.forEach(t => {
+      if (have(t)) return;
+      if (t === 'Shifts' && blank) { reqs.push({ updateSheetProperties: { properties: { sheetId: blank.sheetId, title: t, gridProperties: { frozenRowCount: 1 } }, fields: 'title,gridProperties.frozenRowCount' } }); fmt.push(blank.sheetId); }
+      else reqs.push({ addSheet: { properties: { title: t, gridProperties: { frozenRowCount: t === 'About' ? 0 : 1 } } } });
+    });
+    if (!reqs.length) return;
+    const rep = await (await gfetch(SHEETS_API + id + ':batchUpdate', { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ requests: reqs }) })).json();
+    (rep.replies || []).forEach(r => { if (r.addSheet && r.addSheet.properties.title !== 'About') fmt.push(r.addSheet.properties.sheetId); });
+    if (fmt.length) await gfetch(SHEETS_API + id + ':batchUpdate', { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ requests: fmt.map(sid => (
+      { repeatCell: { range: { sheetId: sid, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true } } }, fields: 'userEnteredFormat.textFormat.bold' } })) }) });
+  }
+  async function sheetWrite(id, rows) {
+    // Write first, then clear only the leftover rows below, so the sheet is never empty (even if a call fails half-way).
+    const about = [['Time Clock – backup copy', ''], ['Google account', (sync.account && sync.account.email) || ''], ['Last updated', new Date().toLocaleString('en-GB')],
+      ['Shifts', rows.shifts.length], ['', ''], ['This sheet is updated automatically by the Time Clock app after every change. It is a backup copy only:', ''],
+      ['changes made here are not read back by the app and will be overwritten.', '']];
+    await gfetch(SHEETS_API + id + '/values:batchUpdate', { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ valueInputOption: 'RAW', data: [
+      { range: "'Shifts'!A1", values: [['Date', 'Day', 'Start', 'End', 'Hours', 'Hours (decimal)', 'Note']].concat(rows.shifts) },
+      { range: "'Day notes'!A1", values: [['Date', 'Day', 'Note']].concat(rows.notes) },
+      { range: "'About'!A1", values: about }] }) });
+    await gfetch(SHEETS_API + id + '/values:batchClear', { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ ranges: [
+      "'Shifts'!A" + (rows.shifts.length + 2) + ':G', "'Day notes'!A" + (rows.notes.length + 2) + ':C', "'About'!A" + (about.length + 1) + ':B'] }) });
+  }
+  async function sheetBackup() {
+    if (!sheetWanted() || !sync.sheetOk || !sync.account) return;
+    const rows = sheetRows(), h = sheetHash(JSON.stringify(rows)), sb = data.meta.sheet;
+    if (sheet.verified && sb && sb.uid === data.meta.uid && sb.hash === h) return;
+    if (sheet.state === 'error' && Date.now() < sheet.retryAt && h === sheet.failedHash) return;   // wait a bit before retrying the same content
+    sheet.state = 'saving'; updateSyncUI();
+    try {
+      const f = await sheetLocate();
+      await sheetTabs(f.id);
+      await sheetWrite(f.id, rows);
+      data.meta.sheet = { id: f.id, url: f.webViewLink || ('https://docs.google.com/spreadsheets/d/' + f.id + '/edit'), uid: data.meta.uid, hash: h, last: Date.now() };
+      sheet.verified = true; sheet.state = 'ok'; sheet.err = '';
+    } catch (e) {
+      if (e.auth) throw e;
+      sheet.state = 'error'; sheet.err = (e && e.message) || String(e); sheet.retryAt = Date.now() + 2 * 60000;
+      sheet.failedHash = h;
+    }
+    updateSyncUI();
+  }
+
   async function syncCycle() {
     if (sync.busy || !sync.account || !SC || !SC.googleClientId) return;
     if (!navigator.onLine) { sync.state = 'offline'; updateSyncUI(); return; }
@@ -819,6 +908,7 @@
       Object.keys(snapU).forEach(k => { if (data.meta.u[k] === snapU[k]) delete data.meta.dirty[k]; });
       if (changed) refreshAfterRemote();
       sync.state = 'synced'; sync.last = Date.now(); sync.err = '';
+      await sheetBackup();
     } catch (e) {
       if (e.auth) sync.state = 'needtoken'; else { sync.state = navigator.onLine ? 'error' : 'offline'; sync.err = (e && e.message) || String(e); }
     }
@@ -838,14 +928,14 @@
   function makeClient() {
     if (tokenClient || !sdkReady()) return;
     tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: SC.googleClientId, scope: SCOPE, callback: onToken,
+      client_id: SC.googleClientId, scope: scopeNow(), callback: onToken,
       error_callback: () => { sync.requesting = false; sync.nextAsk = Date.now() + 5 * 60000; }
     });
   }
   function requestToken() {                       // must run inside a tap / click
     makeClient();
     if (!tokenClient) { alert('Could not reach Google. Check your connection and try again.'); return; }
-    sync.requesting = true; tokenClient.requestAccessToken({ prompt: '' });
+    sync.requesting = true; sync.askedScope = scopeNow(); tokenClient.requestAccessToken({ prompt: '', scope: sync.askedScope });
   }
   async function onToken(resp) {
     sync.requesting = false;
@@ -854,6 +944,10 @@
       alert('To sync, please allow access to the app’s private folder in your Google Drive.'); return;
     }
     sync.token = resp.access_token; sync.exp = Date.now() + (parseInt(resp.expires_in, 10) || 3600) * 1000;
+    sync.sheetOk = google.accounts.oauth2.hasGrantedAllScopes(resp, SHEET_SCOPE);
+    // Asked for the Sheet permission and it was not given: stop asking on every renewal (Settings offers "Allow").
+    if (!sync.sheetOk && (sync.askedScope || '').indexOf(SHEET_SCOPE) >= 0) data.meta.sheetDeclined = true;
+    if (sync.sheetOk) delete data.meta.sheetDeclined;
     if (sync.account) { syncCycle(); return; }
     try {
       const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + sync.token } });
@@ -894,7 +988,7 @@
   }
   function signOut(clear) {
     if (clear && Object.keys(data.meta.dirty).length && !confirm('Some changes are not synced yet and would be lost. Continue?')) return;
-    sync.token = null; sync.exp = 0; sync.account = null; data.meta.account = null; sync.state = 'signedout';
+    sync.token = null; sync.exp = 0; sync.account = null; data.meta.account = null; sync.state = 'signedout'; sync.sheetOk = false; sheet.verified = false;
     if (clear) wipeLocal();
     store.set(data); afterAuthUI();
   }
@@ -910,19 +1004,36 @@
       error: 'Sync problem – tap for details'
     }[sync.state] || '';
   }
+  function sheetText() {
+    const sb = data.meta.sheet && data.meta.sheet.uid === data.meta.uid ? data.meta.sheet : null;
+    if (!sheetWanted()) return 'Off. An existing backup sheet stays in your Drive until you delete it.';
+    if (data.meta.sheetDeclined || (tokenValid() && !sync.sheetOk)) return 'Google permission for the backup sheet was not given.';
+    if (sheet.state === 'saving') return 'Saving backup…';
+    if (sheet.state === 'error') return 'Backup sheet problem: ' + sheet.err;
+    if (sb && sb.last) return 'Backed up ' + (dkey(sb.last) === dkey(Date.now()) ? 'today' : fmtDay(dkey(sb.last))) + ' at ' + tkey(sb.last) + '.';
+    return 'The sheet is created in your Drive at the next sync.';
+  }
   function updateSyncUI() {
     const l = $('syncLine'); if (l) l.textContent = syncText();
     const t = $('syncStatus'); if (t) t.textContent = syncText() + (sync.state === 'error' && sync.err ? ' (' + sync.err + ')' : '');
+    const ss = $('sheetStatus'); if (ss) ss.textContent = sheetText();
+    const so = $('sheetOpen'), sb = data.meta.sheet && data.meta.sheet.uid === data.meta.uid ? data.meta.sheet : null;
+    if (so) { so.hidden = !(sheetWanted() && sb && sb.url); if (sb) so.href = sb.url; }
+    const sa = $('sheetAllow'); if (sa) sa.hidden = !(sheetWanted() && (data.meta.sheetDeclined || (tokenValid() && !sync.sheetOk)));
   }
   function syncSection() {
     if (sync.state === 'none') return '';
     let body;
     if (sync.state === 'notconfigured') body = '<div class="hint">Cloud sync is not switched on in this copy of the app, so your hours stay on this device. See the README to turn it on.</div>';
-    else if (!sync.account) body = '<div class="actions" style="margin:0"><button class="btn" id="syncIn">Sign in with Google</button></div><div class="hint">See the same hours on your phone, tablet and computer. Your hours are saved in a hidden app folder in your own Google Drive. Nobody else can read them, and you can always recover them by signing in to your Google account.</div>';
+    else if (!sync.account) body = '<div class="actions" style="margin:0"><button class="btn" id="syncIn">Sign in with Google</button></div><div class="hint">See the same hours on your phone, tablet and computer. Your hours are saved in a hidden app folder in your own Google Drive, with a readable backup copy in a Google Sheet there. Nobody else can read them, and you can always recover them by signing in to your Google account.</div>';
     else body = '<div style="font-weight:600;margin-bottom:6px">' + esc(sync.account.email) + '</div><div class="hint" id="syncStatus" style="margin:0 0 10px"></div><div class="actions" style="margin:0">' +
       (sync.state === 'needtoken' ? '<button class="btn" id="syncReconnect">Reconnect</button>' : '<button class="btn ghost" id="syncNow">Sync now</button>') +
       '<button class="btn ghost" id="syncOut">Sign out</button><button class="btn danger" id="syncOutClear">Sign out &amp; clear this device</button></div>' +
-      '<div class="hint" style="margin-top:10px">Stored in your own Google Drive (hidden app folder). To remove it: Google Account → Drive → Manage apps.</div>';
+      '<div class="hint" style="margin-top:10px">Stored in your own Google Drive (hidden app folder). To remove it: Google Account → Drive → Manage apps.</div>' +
+      '<div class="sheet-box"><label class="check"><input type="checkbox" id="sheetOn" ' + (sheetWanted() ? 'checked' : '') + '>Backup copy in Google Sheets</label>' +
+      '<div class="hint" style="margin:0 0 10px">A spreadsheet named “' + SHEET_NAME + '” in your own Drive, with one row per shift. It is updated automatically after every change, so your hours are safe even if this device or the app fails.</div>' +
+      '<div class="hint" id="sheetStatus" style="margin:0 0 10px"></div>' +
+      '<div class="actions" style="margin:0"><a class="btn ghost" id="sheetOpen" target="_blank" rel="noopener" hidden>Open backup sheet</a><button class="btn ghost" id="sheetAllow" hidden>Allow access</button></div></div>';
     return '<div class="field"><label>Cloud sync</label>' + body + '</div>';
   }
   function bindSync() {
@@ -931,6 +1042,12 @@
     const r = $('syncReconnect'); if (r) r.onclick = requestToken;
     const c = $('syncOut'); if (c) c.onclick = () => signOut(false);
     const d = $('syncOutClear'); if (d) d.onclick = () => signOut(true);
+    const so = $('sheetOn'); if (so) so.onchange = () => {
+      data.settings.sheetBackup = so.checked; touch('cfg'); sheet.verified = false;
+      if (so.checked) { delete data.meta.sheetDeclined; if (!sync.sheetOk) requestToken(); }
+      save(); updateSyncUI();
+    };
+    const sa = $('sheetAllow'); if (sa) sa.onclick = () => { delete data.meta.sheetDeclined; store.set(data); requestToken(); };
     updateSyncUI();
   }
 

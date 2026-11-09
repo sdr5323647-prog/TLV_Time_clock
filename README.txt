@@ -25,12 +25,14 @@ Google's screen names change now and then; the idea of each step stays the same.
 1. Go to https://console.cloud.google.com -> project selector (top bar) -> New project
    -> name "Time Clock" -> Create. Make sure that project is selected.
 2. Menu -> APIs & Services -> Library -> search "Google Drive API" -> Enable.
+   Then search "Google Sheets API" -> Enable (used for the automatic backup spreadsheet).
 3. Menu -> APIs & Services -> OAuth consent screen (may be called "Google Auth Platform") -> Get started.
    - App name: Time Clock. User support email: yours. Audience: External. Contact email: yours.
    - Data Access / Scopes -> Add or remove scopes -> tick these two, then Save:
        .../auth/drive.appdata      ("See, create and delete its own configuration data in your Google Drive")
+       .../auth/drive.file         ("See, edit, create and delete only the specific Google Drive files you use with this app")
        .../auth/userinfo.email
-     These are the only permissions the app asks for. It can NOT see anything else in anyone's Drive.
+     These are the only permissions the app asks for (drive.file = only the backup spreadsheet the app creates). It can NOT see anything else in anyone's Drive.
    - Audience -> "Publish app" (move it from Testing to In production).
      If you leave it in Testing, only people you add as "Test users" can sign in.
      These two scopes are low-risk, so Google does not require a verification review.

@@ -4,16 +4,17 @@
 <style>body{font:17px/1.6 system-ui,-apple-system,"Segoe UI",Arial,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;color:#16222E}h1{font-size:28px}h2{margin-top:28px;font-size:20px}</style></head>
 <body>
 <h1>Time Clock – Privacy Policy</h1>
-<p>Last updated: 5 November 2026</p>
+<p>Last updated: 9 November 2026</p>
 <p>Time Clock is a small web app for recording work hours. This page explains what happens to your data.</p>
 
 <h2>What the app stores</h2>
 <p>The hours, notes and settings you enter are stored in your own browser on your own device. The app has no server of its own and the developer cannot see this data.</p>
 
 <h2>Optional Google sign-in and sync</h2>
-<p>If you choose "Sign in with Google", the app asks for two permissions:</p>
+<p>If you choose "Sign in with Google", the app asks for these permissions:</p>
 <ul>
 <li><b>Google Drive – app data folder</b> (<code>drive.appdata</code>): lets the app keep one small file with your hours in a hidden folder inside <i>your own</i> Google Drive. Only this app can open that folder. The app cannot see, read or change any other file in your Drive.</li>
+<li><b>Google Drive – files created by this app</b> (<code>drive.file</code>): lets the app create and update one spreadsheet named "Time Clock – backup" in <i>your own</i> Google Drive. It holds a readable copy of your shifts and day notes, so your hours are safe even if the app or a device fails. The app can only open files it created itself; it cannot see, read or change any other file in your Drive. You can turn this backup off in Settings.</li>
 <li><b>Email address</b> (<code>userinfo.email</code>): used only to show which Google account is signed in on the screen.</li>
 </ul>
 <p>Your hours are sent only between your device and your own Google Drive. They are never sent to the developer or to any other party.</p>
@@ -28,7 +29,8 @@
 <h2>Deleting your data</h2>
 <ul>
 <li>In the app: Settings → "Sign out &amp; clear this device" removes the data from the device.</li>
-<li>In Google: Google Account → Data &amp; privacy → Third-party apps and services → Time Clock → "Delete app data" or "Delete all connections". This removes the file from your Drive and revokes the app's access.</li>
+<li>In Google: Google Account → Data &amp; privacy → Third-party apps and services → Time Clock → "Delete app data" or "Delete all connections". This removes the hidden app file from your Drive and revokes the app's access.</li>
+<li>The backup spreadsheet "Time Clock – backup" is an ordinary file in your Drive: delete it there like any other file.</li>
 </ul>
 
 <h2>Contact</h2>

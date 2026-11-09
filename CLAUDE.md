@@ -47,7 +47,8 @@ data = {
 
 ## Cloud sync (optional, per user)
 
-- Sign in with Google (Google Identity Services token flow, scopes `drive.appdata` + `userinfo.email`).
+- Sign in with Google (Google Identity Services token flow, scopes `drive.appdata` + `userinfo.email` + `drive.file`).
+  `drive.file` is only requested while `settings.sheetBackup !== false` and the user has not declined it (`meta.sheetDeclined`).
 - Data lives **only in the user's own Google Drive**, hidden app folder, one file `timeclock-data.json`
   (`{ v:1, records:{ key: {t,..., d, u} } }`). The developer/host cannot read it. There is no backend and no database.
   Do not add analytics, servers, or anything that sends hours/emails elsewhere.
@@ -56,6 +57,15 @@ data = {
 - Triggers: a few seconds after a change, app open/focus, online, every 60 s while visible.
 - Access tokens last 1 hour and renewing needs a user gesture, so the next click renews it (`state: needtoken`).
 - Switching Google account on a device asks before replacing local data.
+
+### Backup spreadsheet (Google Sheets)
+
+- On by default (`settings.sheetBackup`, synced with `cfg`; switch in Settings → Cloud sync). Needs the Google Sheets API enabled in the Cloud project.
+- One spreadsheet per account, "Time Clock – backup", created through the Drive API with `appProperties.timeclockBackup = '1'`
+  so every device finds the same file (`sheetLocate`). Tabs: `Shifts` (Date, Day, Start, End, Hours, Hours (decimal), Note), `Day notes`, `About`.
+- `sheetBackup()` runs at the end of each successful `syncCycle()`; it rewrites the tabs (RAW values, write first, then clear leftover rows)
+  only when the content hash changed (and once per app session). State in `data.meta.sheet = { id, url, uid, hash, last }` (local only).
+- One-way copy: the app never reads it back. Sheet errors never break the main sync; they show in Settings and retry after 2 minutes.
 
 ## Excel report (Torah Live template)
 
@@ -88,7 +98,7 @@ styles and formulas must be preserved.
 
 1. Never commit secrets. (The Google **client secret** is not used by this app and must never appear in the repo.)
 2. Do not change the Google Client ID, OAuth scopes, `privacy.html` or `terms.html` without asking the owner.
-3. Keep it working offline and installable; keep everything in the browser (no external requests except Google sign-in / Drive API).
+3. Keep it working offline and installable; keep everything in the browser (no external requests except Google sign-in / Drive API / Sheets API).
 4. Don't break existing users' data (see Data model) or the Excel layout (see Excel report).
 5. Keep the UI English; keep `<html lang="en" dir="ltr">`.
 
