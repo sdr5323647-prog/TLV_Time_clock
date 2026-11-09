@@ -66,6 +66,11 @@ data = {
 - `sheetBackup()` runs at the end of each successful `syncCycle()`; it rewrites the tabs (RAW values, write first, then clear leftover rows)
   only when the content hash changed (and once per app session). State in `data.meta.sheet = { id, url, uid, hash, last }` (local only).
 - One-way copy: the app never reads it back. Sheet errors never break the main sync; they show in Settings and retry after 2 minutes.
+- Monthly reports (`reportsBackup()`, same run): for each month with data in the last 13 months, `makeXlsx()` builds the
+  Torah Live template file, which is uploaded to the Drive folder "Time Clock – reports" and converted to Google Sheets
+  (folder tag `appProperties.timeclockReports='1'`, file tags `timeclockReport='YYYY-MM'` + `h=<hash of buildMonthRows + name>`).
+  Only months whose hash changed are re-uploaded (PATCH with conversion; if that fails: create new + delete old).
+  So any change to `makeXlsx`/`buildMonthRows` also changes these Drive reports.
 
 ## Excel report (Torah Live template)
 

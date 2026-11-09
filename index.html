@@ -669,7 +669,7 @@
   function reportNames(month, name) {
     const [y, m] = month.split('-').map(Number);
     const en = new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long' });
-    const base = name.replace(/[\\/:*?"<>|]/g, '').trim() + ' – ' + en + ' ' + y;
+    const base = (name.replace(/[\\/:*?"<>|]/g, '').trim() || 'Hours report') + ' – ' + en + ' ' + y;
     return { file: base + '.xlsx', subject: base };
   }
 
@@ -809,7 +809,7 @@
   // It is a one-way, human-readable copy: rewritten from local data after a sync whenever something changed. Never read back.
   const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets/';
   const SHEET_NAME = 'Time Clock – backup', SHEET_TAG = 'timeclockBackup', SHEET_TABS = ['Shifts', 'Day notes', 'About'];
-  const sheet = { state: 'idle', err: '', verified: false, retryAt: 0 };
+  const sheet = { state: 'idle', err: '', verified: false, retryAt: 0, rep: null, patchOk: true };
   function sheetWanted() { return data.settings.sheetBackup !== false; }
   function sheetHash(str) { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0; return h.toString(36) + '.' + str.length; }
   function sheetRows() {
@@ -853,7 +853,7 @@
   async function sheetWrite(id, rows) {
     // Write first, then clear only the leftover rows below, so the sheet is never empty (even if a call fails half-way).
     const about = [['Time Clock – backup copy', ''], ['Google account', (sync.account && sync.account.email) || ''], ['Last updated', new Date().toLocaleString('en-GB')],
-      ['Shifts', rows.shifts.length], ['', ''], ['This sheet is updated automatically by the Time Clock app after every change. It is a backup copy only:', ''],
+      ['Shifts', rows.shifts.length], ['Monthly reports', 'Drive folder “' + REPORTS_FOLDER + '” (Torah Live template)'], ['', ''], ['This sheet is updated automatically by the Time Clock app after every change. It is a backup copy only:', ''],
       ['changes made here are not read back by the app and will be overwritten.', '']];
     await gfetch(SHEETS_API + id + '/values:batchUpdate', { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ valueInputOption: 'RAW', data: [
       { range: "'Shifts'!A1", values: [['Date', 'Day', 'Start', 'End', 'Hours', 'Hours (decimal)', 'Note']].concat(rows.shifts) },
@@ -862,9 +862,58 @@
     await gfetch(SHEETS_API + id + '/values:batchClear', { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ ranges: [
       "'Shifts'!A" + (rows.shifts.length + 2) + ':G', "'Day notes'!A" + (rows.notes.length + 2) + ':C', "'About'!A" + (about.length + 1) + ':B'] }) });
   }
+  // --- Monthly hours reports in the Torah Live template, as Google Sheets in a "Time Clock – reports" Drive folder ---
+  // Built with makeXlsx() (same file as "Hours report (Excel)") and converted by Drive. One file per month (last 13 months),
+  // tagged with appProperties { timeclockReport: 'YYYY-MM', h: <content hash> } so any device can tell if it is up to date.
+  const REPORTS_FOLDER = 'Time Clock – reports', GSHEET = 'application/vnd.google-apps.spreadsheet';
+  const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  function multipartBody(meta, blob, b) {
+    return new Blob(['--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(meta) + '\r\n--' + b + '\r\nContent-Type: ' + XLSX_MIME + '\r\n\r\n', blob, '\r\n--' + b + '--']);
+  }
+  async function reportsState() {
+    if (sheet.rep && sheet.rep.uid === data.meta.uid) return sheet.rep;
+    const q = "mimeType='application/vnd.google-apps.folder' and appProperties has { key='timeclockReports' and value='1' } and trashed=false";
+    let folder = ((await (await drive('/drive/v3/files?pageSize=10&orderBy=createdTime&fields=' + encodeURIComponent('files(id,webViewLink)') + '&q=' + encodeURIComponent(q))).json()).files || [])[0];
+    if (!folder) folder = await (await drive('/drive/v3/files?fields=id,webViewLink', { method: 'POST', headers: JSON_HDR,
+      body: JSON.stringify({ name: REPORTS_FOLDER, mimeType: 'application/vnd.google-apps.folder', appProperties: { timeclockReports: '1' } }) })).json();
+    const files = {};
+    const fq = "'" + folder.id + "' in parents and trashed=false";
+    const list = (await (await drive('/drive/v3/files?pageSize=200&fields=' + encodeURIComponent('files(id,appProperties)') + '&q=' + encodeURIComponent(fq))).json()).files || [];
+    list.forEach(f => { const a = f.appProperties || {}; if (a.timeclockReport) files[a.timeclockReport] = { id: f.id, h: a.h || '' }; });
+    sheet.rep = { uid: data.meta.uid, folder: folder.id, url: folder.webViewLink || ('https://drive.google.com/drive/folders/' + folder.id), files };
+    return sheet.rep;
+  }
+  async function reportsBackup() {
+    if (!window.JSZip) return null;
+    const st = await reportsState(), name = data.settings.name || '';
+    const min = addMonths(dkey(Date.now()).slice(0, 7), -12), months = new Set(Object.keys(st.files));
+    data.shifts.forEach(x => months.add(dkey(x.start).slice(0, 7)));
+    Object.keys(data.dayNotes).forEach(k => months.add(k.slice(0, 7)));
+    for (const mo of [...months].filter(m => m >= min).sort()) {
+      const h = sheetHash(JSON.stringify(buildMonthRows(mo)) + '|' + name), cur = st.files[mo];
+      if (cur && cur.h === h) continue;
+      const blob = await makeXlsx(mo, name), title = reportNames(mo, name).subject, b = 'tcr' + Date.now();
+      let id = null;
+      if (cur && sheet.patchOk) {
+        try {
+          id = (await (await drive('/upload/drive/v3/files/' + cur.id + '?uploadType=multipart&fields=id', { method: 'PATCH', headers: { 'Content-Type': 'multipart/related; boundary=' + b },
+            body: multipartBody({ name: title, appProperties: { h } }, blob, b) })).json()).id;
+        } catch (e) { if (e.auth) throw e; if (e.status !== 404) sheet.patchOk = false; }
+      }
+      if (!id) {
+        id = (await (await drive('/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b },
+          body: multipartBody({ name: title, mimeType: GSHEET, parents: [st.folder], appProperties: { timeclockReport: mo, h } }, blob, b) })).json()).id;
+        if (cur) { try { await drive('/drive/v3/files/' + cur.id, { method: 'DELETE' }); } catch (e) { if (e.auth) throw e; } }
+      }
+      st.files[mo] = { id, h };
+    }
+    return st.url;
+  }
+
   async function sheetBackup() {
     if (!sheetWanted() || !sync.sheetOk || !sync.account) return;
-    const rows = sheetRows(), h = sheetHash(JSON.stringify(rows)), sb = data.meta.sheet;
+    const rows = sheetRows(), sb = data.meta.sheet;
+    const h = sheetHash(JSON.stringify(rows) + '|' + (data.settings.name || '') + '|' + (data.settings.autoBreak || 0));
     if (sheet.verified && sb && sb.uid === data.meta.uid && sb.hash === h) return;
     if (sheet.state === 'error' && Date.now() < sheet.retryAt && h === sheet.failedHash) return;   // wait a bit before retrying the same content
     sheet.state = 'saving'; updateSyncUI();
@@ -872,7 +921,8 @@
       const f = await sheetLocate();
       await sheetTabs(f.id);
       await sheetWrite(f.id, rows);
-      data.meta.sheet = { id: f.id, url: f.webViewLink || ('https://docs.google.com/spreadsheets/d/' + f.id + '/edit'), uid: data.meta.uid, hash: h, last: Date.now() };
+      const reportsUrl = await reportsBackup();
+      data.meta.sheet = { id: f.id, url: f.webViewLink || ('https://docs.google.com/spreadsheets/d/' + f.id + '/edit'), reportsUrl, uid: data.meta.uid, hash: h, last: Date.now() };
       sheet.verified = true; sheet.state = 'ok'; sheet.err = '';
     } catch (e) {
       if (e.auth) throw e;
@@ -988,7 +1038,7 @@
   }
   function signOut(clear) {
     if (clear && Object.keys(data.meta.dirty).length && !confirm('Some changes are not synced yet and would be lost. Continue?')) return;
-    sync.token = null; sync.exp = 0; sync.account = null; data.meta.account = null; sync.state = 'signedout'; sync.sheetOk = false; sheet.verified = false;
+    sync.token = null; sync.exp = 0; sync.account = null; data.meta.account = null; sync.state = 'signedout'; sync.sheetOk = false; sheet.verified = false; sheet.rep = null;
     if (clear) wipeLocal();
     store.set(data); afterAuthUI();
   }
@@ -1008,7 +1058,7 @@
     const sb = data.meta.sheet && data.meta.sheet.uid === data.meta.uid ? data.meta.sheet : null;
     if (!sheetWanted()) return 'Off. An existing backup sheet stays in your Drive until you delete it.';
     if (data.meta.sheetDeclined || (tokenValid() && !sync.sheetOk)) return 'Google permission for the backup sheet was not given.';
-    if (sheet.state === 'saving') return 'Saving backup…';
+    if (sheet.state === 'saving') return 'Saving backup and monthly reports…';
     if (sheet.state === 'error') return /Sheets API has not been used|SERVICE_DISABLED|is disabled/i.test(sheet.err)
       ? 'Backup sheet not active yet: the Google Sheets API is not enabled for this app. The app will retry automatically.'
       : 'Backup sheet problem: ' + sheet.err;
@@ -1021,6 +1071,7 @@
     const ss = $('sheetStatus'); if (ss) ss.textContent = sheetText();
     const so = $('sheetOpen'), sb = data.meta.sheet && data.meta.sheet.uid === data.meta.uid ? data.meta.sheet : null;
     if (so) { so.hidden = !(sheetWanted() && sb && sb.url); if (sb) so.href = sb.url; }
+    const sr = $('reportsOpen'); if (sr) { sr.hidden = !(sheetWanted() && sb && sb.reportsUrl); if (sb && sb.reportsUrl) sr.href = sb.reportsUrl; }
     const sa = $('sheetAllow'); if (sa) sa.hidden = !(sheetWanted() && (data.meta.sheetDeclined || (tokenValid() && !sync.sheetOk)));
   }
   function syncSection() {
@@ -1033,9 +1084,9 @@
       '<button class="btn ghost" id="syncOut">Sign out</button><button class="btn danger" id="syncOutClear">Sign out &amp; clear this device</button></div>' +
       '<div class="hint" style="margin-top:10px">Stored in your own Google Drive (hidden app folder). To remove it: Google Account → Drive → Manage apps.</div>' +
       '<div class="sheet-box"><label class="check"><input type="checkbox" id="sheetOn" ' + (sheetWanted() ? 'checked' : '') + '>Backup copy in Google Sheets</label>' +
-      '<div class="hint" style="margin:0 0 10px">A spreadsheet named “' + SHEET_NAME + '” in your own Drive, with one row per shift. It is updated automatically after every change, so your hours are safe even if this device or the app fails.</div>' +
+      '<div class="hint" style="margin:0 0 10px">A spreadsheet named “' + SHEET_NAME + '” in your own Drive, with one row per shift, plus a monthly hours report in the Torah Live template in the folder “' + REPORTS_FOLDER + '”. Both are updated automatically after every change, so your hours are safe even if this device or the app fails.</div>' +
       '<div class="hint" id="sheetStatus" style="margin:0 0 10px;overflow-wrap:anywhere"></div>' +
-      '<div class="actions" style="margin:0"><a class="btn ghost" id="sheetOpen" target="_blank" rel="noopener" hidden>Open backup sheet</a><button class="btn ghost" id="sheetAllow" hidden>Allow access</button></div></div>';
+      '<div class="actions" style="margin:0"><a class="btn ghost" id="sheetOpen" target="_blank" rel="noopener" hidden>Open backup sheet</a><a class="btn ghost" id="reportsOpen" target="_blank" rel="noopener" hidden>Monthly reports</a><button class="btn ghost" id="sheetAllow" hidden>Allow access</button></div></div>';
     return '<div class="field"><label>Cloud sync</label>' + body + '</div>';
   }
   function bindSync() {
