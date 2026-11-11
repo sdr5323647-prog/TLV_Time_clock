@@ -1,6 +1,6 @@
 // Offline support. Network-first: when online the newest files are always used (and cached);
 // when offline the cached copy is used. Bump CACHE when files are added or removed.
-const CACHE = 'timeclock-v9';
+const CACHE = 'timeclock-v10';
 const FILES = ['./', './index.html', './manifest.webmanifest', './jszip.min.js', './icon-192.png', './icon-512.png', './sync-config.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
